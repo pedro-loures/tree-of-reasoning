@@ -93,6 +93,29 @@ def test_split_payload_to_shards(tmp_path: Path):
     assert "completion_text" not in shard["leaf_completions"]["d1_1"]
 
 
+def test_filter_payload_variant_plain_only():
+    payload = {
+        "tree_summaries": [
+            {"tree_key": "a", "instruction_variant": "plain", "prefix_length": 0},
+            {"tree_key": "b", "instruction_variant": "legacy", "prefix_length": 0},
+        ],
+        "trees": {"a": [{"id": "root"}], "b": [{"id": "root"}]},
+        "node_status": {"a": {}, "b": {}},
+        "node_stats": {"a": {}, "b": {}},
+        "leaf_completions": {"a": {}, "b": {}},
+        "viewer_runs": 2,
+        "prefix_lengths": [0],
+        "instruction_variants": ["legacy", "plain"],
+    }
+    from src.pipelines.analysis.pages_export import filter_payload_variant
+
+    filtered = filter_payload_variant(payload, "plain")
+    assert filtered["viewer_runs"] == 1
+    assert [s["tree_key"] for s in filtered["tree_summaries"]] == ["a"]
+    assert list(filtered["trees"].keys()) == ["a"]
+    assert filtered["instruction_variants"] == ["plain"]
+
+
 def test_build_tutorial_payload_picks_smallest():
     payload = {
         "runs": [

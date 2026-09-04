@@ -30,7 +30,7 @@ TD.SummaryPanel = class {
     if (!this.tableEl) return;
     const thead = this.tableEl.querySelector("thead");
     const tbody = this.tableEl.querySelector("tbody");
-    thead.innerHTML = `<tr>${this.columns.map(col => `<th data-key="${col.key}">${col.label}${this.sortKey === col.key ? (this.sortAsc ? " ▲" : " ▼") : ""}</th>`).join("")}</tr>`;
+    thead.innerHTML = `<tr>${this.columns.map(col => `<th data-key="${col.key}" class="${col.highlight ? "highlight" : ""}">${col.label}${this.sortKey === col.key ? (this.sortAsc ? " ▲" : " ▼") : ""}</th>`).join("")}</tr>`;
     thead.querySelectorAll("th").forEach(th => {
       th.addEventListener("click", () => {
         const key = th.dataset.key;
@@ -41,7 +41,7 @@ TD.SummaryPanel = class {
     });
     const sorted = this.sortRows(rows);
     tbody.innerHTML = sorted.map(row => {
-      const cells = this.columns.map(col => `<td>${utils.escapeHtml(String(utils.fmtVal(row[col.key])))}</td>`).join("");
+      const cells = this.columns.map(col => `<td class="${col.highlight ? "highlight" : ""}">${utils.escapeHtml(String(utils.fmtVal(row[col.key])))}</td>`).join("");
       return `<tr class="clickable" data-tree-key="${utils.escapeHtml(row.tree_key || "")}">${cells}</tr>`;
     }).join("");
     tbody.querySelectorAll("tr").forEach(tr => {

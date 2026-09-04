@@ -41,6 +41,8 @@ h1 { margin: 0 0 4px; font-size: 20px; }
 .tabs { display: flex; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
 .layout { display: grid; grid-template-columns: 1fr minmax(320px, 420px); height: calc(100vh - 280px); min-height: 420px; }
 .graph-wrap { position: relative; overflow: hidden; border-right: 1px solid var(--border); border-top: 1px solid var(--border); }
+.tree-graph-svg { width: 100%; height: 100%; display: block; cursor: grab; }
+.tree-graph-svg:active { cursor: grabbing; }
 #graph { width: 100%; height: 100%; cursor: grab; }
 #graph:active { cursor: grabbing; }
 .sidebar { overflow-y: auto; padding: 14px; background: var(--panel); border-top: 1px solid var(--border); }
@@ -66,12 +68,33 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; padding: 0 20px 8px; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
 .legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
-#tooltip {
+.tree-tooltip, #tooltip {
   position: fixed; pointer-events: none; z-index: 100;
   background: #1e2230; border: 1px solid var(--border); border-radius: 8px;
   padding: 10px 12px; font-size: 12px; max-width: 380px; display: none;
   box-shadow: 0 8px 24px rgba(0,0,0,.45);
 }
+.tree-tooltip .tok, #tooltip .tok { font-family: ui-monospace, monospace; font-size: 13px; margin-bottom: 4px; }
+.chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+.chart-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+.chart-card h3 { margin: 0 0 8px; font-size: 13px; }
+.chart { width: 100%; height: 280px; display: block; }
+.progress-bar { height: 6px; background: #222; border-radius: 3px; margin: 8px 20px 0; overflow: hidden; }
+.progress-fill { height: 100%; background: var(--accent); transition: width 0.3s; }
+.bad-filter { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 8px 20px; font-size: 12px; }
+.bad-filter label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.preset-btn { background: #222; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 11px; cursor: pointer; }
+.leaf-card { border-left: 4px solid var(--leaf); margin-bottom: 8px; }
+.leaf-card.correct { border-left-color: var(--good); }
+.leaf-card.incorrect { border-left-color: var(--bad); }
+.leaf-card.neutral { border-left-color: var(--ditched); }
+.node-card { border-left: 4px solid var(--bad-node); cursor: pointer; margin-bottom: 8px; }
+.node-card.mostly-bad { border-left-color: var(--mostly-bad); }
+.node-card.exclusively-good { border-left-color: var(--good-node); }
+.answer { font-size: 13px; line-height: 1.45; word-break: break-word; }
+.reasoning-block { font-family: ui-monospace, monospace; font-size: 11px; white-space: pre-wrap; margin-top: 8px; color: var(--muted); max-height: 200px; overflow: auto; }
+table.summary th.highlight, table.summary td.highlight { background: #151b28; color: #cfe0ff; }
+@media (max-width: 1100px) { .chart-row { grid-template-columns: 1fr; } }
 .summary-wrap { padding: 20px; max-width: 1400px; margin: 0 auto; }
 .summary-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 16px; }
 .summary-table-wrap { overflow-x: auto; margin-bottom: 24px; }

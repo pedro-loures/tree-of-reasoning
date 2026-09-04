@@ -74,6 +74,7 @@ TD.TreeGraph = class {
 
   nodeCategory(nodeId) {
     const stats = this.statsMap.get(nodeId);
+    if (stats?.color_class) return stats.color_class;
     if (!stats) return "internal";
     if (stats.bad_pct >= 1) return "exclusively_bad";
     if (stats.bad_pct <= 0) return "exclusively_good";
@@ -127,13 +128,18 @@ TD.TreeGraph = class {
     const circles = this.gRoot.selectAll("circle.node").data(nodeData, d => d.id);
     circles.exit().remove();
     const enter = circles.enter().append("circle").attr("class", "node");
-    enter.merge(circles)
+    const merged = enter.merge(circles);
+    merged
       .attr("cx", d => d.x)
       .attr("cy", d => d.y)
       .attr("r", d => (d.c || d.child_ids || []).length ? 7 : 5)
       .attr("fill", d => this.nodeFill(d))
-      .attr("stroke", d => d.id === this.selectedNodeId ? "var(--accent)" : "#111")
-      .attr("stroke-width", d => d.id === this.selectedNodeId ? 2.5 : 1)
+      .attr("stroke", d => {
+        if (d.id === this.selectedNodeId) return "var(--accent)";
+        if (this.expansionMap.has(d.id)) return "var(--expanded)";
+        return "#111";
+      })
+      .attr("stroke-width", d => d.id === this.selectedNodeId ? 2.5 : (this.expansionMap.has(d.id) ? 2 : 1))
       .style("cursor", "pointer")
       .on("click", (event, d) => {
         event.stopPropagation();
@@ -149,6 +155,35 @@ TD.TreeGraph = class {
         }
       })
       .on("mouseleave", () => { if (this.tooltip) this.tooltip.style.display = "none"; });
+
+    const labels = this.gRoot.selectAll("text.node-label").data(nodeData, d => d.id);
+    labels.exit().remove();
+    labels.enter().append("text").attr("class", "node-label")
+      .merge(labels)
+      .attr("x", d => d.x)
+      .attr("y", d => d.y - 10)
+      .attr("text-anchor", "middle")
+      .attr("fill", "#9aa0a6")
+      .attr("font-size", "9px")
+      .text(d => {
+        const stats = this.statsMap.get(d.id);
+        if (stats && (d.c || d.child_ids || []).length) return `${stats.bad_pct_display ?? Math.round(stats.bad_pct * 100)}%`;
+        return utils.displayToken(d.t || d.token).slice(0, 8);
+      });
+  }
+
+  focusNode(nodeId, nodes, minProb = 0) {
+    this.selectedNodeId = nodeId;
+    const pos = this.treePositions(nodes).get(nodeId);
+    if (!pos) return;
+    const width = this.svg.node().clientWidth;
+    const height = this.svg.node().clientHeight;
+    const scale = 1.2;
+    this.svg.transition().duration(400).call(
+      this.zoomBehavior.transform,
+      d3.zoomIdentity.translate(width / 2, height / 2).scale(scale).translate(-pos.x, -pos.y)
+    );
+    this.draw(nodes, minProb);
   }
 
   showTooltip(event, node) {

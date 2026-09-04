@@ -225,6 +225,24 @@ def build_tutorial_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def filter_payload_variant(payload: dict[str, Any], variant: str = "plain") -> dict[str, Any]:
+    summaries = [s for s in payload.get("tree_summaries", []) if s.get("instruction_variant") == variant]
+    keys = {s["tree_key"] for s in summaries}
+    filtered = dict(payload)
+    filtered["tree_summaries"] = summaries
+    filtered["instruction_variants"] = [variant]
+    filtered["viewer_runs"] = len(summaries)
+    for key in ("trees", "node_status", "leaf_completions", "node_stats", "node_expansions", "candidate_mention_probs"):
+        if key in filtered and isinstance(filtered[key], dict):
+            filtered[key] = {tree_key: value for tree_key, value in filtered[key].items() if tree_key in keys}
+    if "runs" in filtered:
+        filtered["runs"] = [run for run in filtered["runs"] if run.get("tree_key") in keys]
+    filtered["prefix_lengths"] = sorted({
+        int(row["prefix_length"]) for row in summaries if row.get("prefix_length") is not None
+    })
+    return filtered
+
+
 def export_capitals_sharded(
     mech_interp_path: Path,
     bad_nodes_path: Path,
@@ -241,6 +259,7 @@ def export_capitals_sharded(
     )
     if temp_json.exists():
         temp_json.unlink()
+    payload = filter_payload_variant(payload, "plain")
     return split_payload_to_shards(payload, output_dir, "capitals")
 
 

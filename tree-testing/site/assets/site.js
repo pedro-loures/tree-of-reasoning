@@ -93,8 +93,19 @@ TreeDashboard.switchTopTab = function(name) {
   document.dispatchEvent(new CustomEvent("experiment-tab", { detail: { experiment: name } }));
 };
 
+TreeDashboard.bindSubTabs = function(adapter, root) {
+  root.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      TreeDashboard.switchSubTab(root, btn.dataset.tab);
+      if (btn.dataset.tab === "trees" && adapter.ensureTreeLoaded) {
+        await adapter.ensureTreeLoaded();
+      }
+    });
+  });
+};
+
 document.addEventListener("DOMContentLoaded", () => {
-  document.querySelectorAll(".top-tab-btn").forEach(btn => {
+  document.querySelectorAll(".top-tab-btn[data-experiment]").forEach(btn => {
     btn.addEventListener("click", () => TreeDashboard.switchTopTab(btn.dataset.experiment));
   });
 });

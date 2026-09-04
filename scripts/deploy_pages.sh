@@ -9,6 +9,8 @@ BUILD_ONLY=false
 SKIP_BUILD=false
 REMOTE="${REMOTE:-origin}"
 BRANCH="${BRANCH:-gh-pages}"
+GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-pedro-loures}"
+GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-pedro-loures@users.noreply.github.com}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -31,7 +33,6 @@ if [[ ! -d "$ROOT/docs" ]]; then
   exit 1
 fi
 
-# Safety: refuse to deploy if docs/data is missing entirely
 if [[ ! -d "$ROOT/docs/data" ]]; then
   echo "Warning: docs/data/ is empty — site shell only" >&2
 fi
@@ -47,38 +48,27 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
   exit 1
 fi
 
-WORKTREE="$ROOT/.pages-deploy"
-rm -rf "$WORKTREE"
-mkdir -p "$WORKTREE"
+REMOTE_URL="$(git remote get-url "$REMOTE")"
+STAGING="$ROOT/.pages-deploy"
+rm -rf "$STAGING"
+mkdir -p "$STAGING"
+rsync -a --delete "$ROOT/docs/" "$STAGING/"
+touch "$STAGING/.nojekyll"
 
-echo "Preparing orphan $BRANCH branch..."
-git fetch "$REMOTE" "$BRANCH" 2>/dev/null || true
-
-if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
-  git worktree add --force "$WORKTREE" "$BRANCH"
-else
-  git worktree add --detach "$WORKTREE"
-  cd "$WORKTREE"
-  git checkout --orphan "$BRANCH"
-  git rm -rf . 2>/dev/null || true
-  cd "$ROOT"
-fi
-
-# Copy built site into worktree
-rsync -a --delete "$ROOT/docs/" "$WORKTREE/"
-touch "$WORKTREE/.nojekyll"
-
-cd "$WORKTREE"
+echo "Preparing $BRANCH deployment..."
+cd "$STAGING"
+git init -q
+git checkout -q -b "$BRANCH"
 git add -A
-if git diff --cached --quiet; then
-  echo "No changes to deploy."
-else
-  git commit -m "chore: deploy GitHub Pages site"
-  git push "$REMOTE" "$BRANCH" --force
-  echo "Deployed to $REMOTE/$BRANCH"
-fi
-
+git -c user.name="$GIT_AUTHOR_NAME" -c user.email="$GIT_AUTHOR_EMAIL" \
+  commit -m "chore: deploy GitHub Pages site"
+git branch -M "$BRANCH"
+git remote add origin "$REMOTE_URL"
+git push -f origin "$BRANCH"
 cd "$ROOT"
-git worktree remove "$WORKTREE" --force 2>/dev/null || rm -rf "$WORKTREE"
+rm -rf "$STAGING"
+git worktree prune 2>/dev/null || true
+git branch -D gh-pages 2>/dev/null || true
 
+echo "Deployed to $REMOTE/$BRANCH"
 echo "Done. Enable Pages: Settings → Pages → branch $BRANCH / root"

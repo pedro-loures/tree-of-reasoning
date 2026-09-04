@@ -14,6 +14,29 @@ from src.pipelines.analysis.tree_parser import compact_tree
 
 COMPLETION_PREVIEW_CHARS = 300
 
+# Heavy per-tree fields belong in shard JSON files, not the manifest.
+_RUN_MANIFEST_DROP_KEYS = frozenset(
+    {
+        "candidate_nodes",
+        "embeddings",
+        "exclusively_bad_nodes",
+        "tree_nodes",
+        "node_status",
+        "leaf_completions",
+        "node_stats",
+        "node_expansions",
+        "tree_summary",
+    }
+)
+
+
+def compact_run_for_manifest(run: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in run.items() if key not in _RUN_MANIFEST_DROP_KEYS}
+
+
+def compact_runs_for_manifest(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [compact_run_for_manifest(run) for run in runs]
+
 
 def tree_key_to_slug(tree_key: str) -> str:
     cleaned = re.sub(r"[^\w.\-]+", "_", tree_key)
@@ -110,7 +133,6 @@ def split_payload_to_shards(
         "mention_categories",
         "regions",
         "presidential_candidates",
-        "runs",
     )
     manifest: dict[str, Any] = {
         "experiment": experiment,
@@ -118,8 +140,9 @@ def split_payload_to_shards(
         "shards": shards,
     }
     for key in manifest_keys:
-        if key in payload:
-            manifest[key] = payload[key]
+        if key not in payload:
+            continue
+        manifest[key] = payload[key]
     if "source" in manifest:
         manifest["source"] = _strip_absolute_paths(str(manifest["source"]))
     if "generated_at" not in manifest:
@@ -187,7 +210,10 @@ def build_tutorial_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
         key=lambda run: (run.get("summary") or {}).get("total_leaves", 10**9),
     )
     tree_key = smallest["tree_key"]
-    shard = build_tree_shard(tree_key, payload, compact_leaves=False)
+    summary = next(
+        (row for row in payload.get("tree_summaries", []) if row.get("tree_key") == tree_key),
+        None,
+    )
     return {
         "tree_key": tree_key,
         "prompt": smallest.get("prompt", ""),
@@ -195,8 +221,7 @@ def build_tutorial_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
         "tau": smallest.get("tau"),
         "expected_answers": smallest.get("expected_answers"),
         "answer_mode": smallest.get("answer_mode"),
-        "run": smallest,
-        "shard": shard,
+        "summary": summary,
     }
 
 

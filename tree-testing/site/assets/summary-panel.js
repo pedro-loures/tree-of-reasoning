@@ -1,7 +1,8 @@
 window.TreeDashboard = window.TreeDashboard || {};
-const { utils } = TreeDashboard;
+(function (TD) {
+const { utils } = TD;
 
-TreeDashboard.SummaryPanel = class {
+TD.SummaryPanel = class {
   constructor(root, columns) {
     this.root = root;
     this.columns = columns;
@@ -60,7 +61,7 @@ TreeDashboard.SummaryPanel = class {
   }
 };
 
-TreeDashboard.renderDetail = function(container, { node, leaf, stats, status }) {
+TD.renderDetail = function(container, { node, leaf, stats, status }) {
   if (!container) return;
   if (!node && !leaf) {
     container.innerHTML = '<p class="muted">Click a node in the graph or a table row.</p>';
@@ -87,3 +88,4 @@ TreeDashboard.renderDetail = function(container, { node, leaf, stats, status }) 
   }
   container.innerHTML = html;
 };
+})(TreeDashboard);

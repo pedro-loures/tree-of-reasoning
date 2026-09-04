@@ -1,5 +1,6 @@
 window.TreeDashboard = window.TreeDashboard || {};
-const { DataStore, TreeGraph, SummaryPanel, renderDetail, switchSubTab, utils } = TreeDashboard;
+(function (TD) {
+const { DataStore, TreeGraph, SummaryPanel, renderDetail, switchSubTab, utils } = TD;
 
 const CAPITALS_COLUMNS = [
   { key: "country_name", label: "Country" },
@@ -12,13 +13,13 @@ const CAPITALS_COLUMNS = [
   { key: "prob_bad_pct", label: "P(bad) %" },
 ];
 
-TreeDashboard.CapitalsAdapter = class {
+TD.CapitalsAdapter = class {
   constructor(root) {
     this.root = root;
     this.store = new DataStore("capitals", "data/capitals");
     this.graph = new TreeGraph("#capitalsGraph", "#capitalsTooltip");
     this.summary = new SummaryPanel(root, CAPITALS_COLUMNS);
-    this.currentRun = null;
+    this.currentSummary = null;
     this.graph.onSelect = nodeId => this.showNode(nodeId);
   }
 
@@ -56,15 +57,11 @@ TreeDashboard.CapitalsAdapter = class {
       const row = summaries.find(s => s.country_id === c);
       return `<option value="${c}">${row?.country_name || c}</option>`;
     }).join("");
-    const runs = (this.store.DATA.runs || []).filter(run => {
-      const summary = summaries.find(s => s.tree_key === run.tree_key);
-      return summary;
-    });
+    const runs = summaries;
     const runSel = this.root.querySelector("#capitalsRunSelect");
-    runSel.innerHTML = runs.map(run => {
-      const summary = summaries.find(s => s.tree_key === run.tree_key);
-      const label = `${summary?.country_name || run.country_id} · ${run.instruction_variant} · p${run.prefix_length}`;
-      return `<option value="${run.tree_key}">${label}</option>`;
+    runSel.innerHTML = runs.map(row => {
+      const label = `${row.country_name || row.country_id} · ${row.instruction_variant} · p${row.prefix_length}`;
+      return `<option value="${row.tree_key}">${label}</option>`;
     }).join("");
   }
 
@@ -86,9 +83,11 @@ TreeDashboard.CapitalsAdapter = class {
   }
 
   async loadRun(treeKey) {
+    const summary = this.store.summaryFor(treeKey);
+    this.currentSummary = summary;
+    const meta = this.root.querySelector("#capitalsRunMeta");
+    if (meta) meta.textContent = "Loading tree…";
     const shard = await this.store.loadTree(treeKey);
-    const run = (this.store.DATA.runs || []).find(r => r.tree_key === treeKey);
-    this.currentRun = run;
     const nodes = shard.tree_nodes || [];
     const leafMap = new Map(Object.entries(shard.leaf_completions || {}));
     const statusMap = new Map(Object.entries(shard.node_status || {}));
@@ -100,9 +99,8 @@ TreeDashboard.CapitalsAdapter = class {
       showGood: this.root.querySelector("#capitalsShowGood")?.checked !== false,
     });
     await this.graph.draw(nodes, minProb);
-    const meta = this.root.querySelector("#capitalsRunMeta");
-    if (meta && run) {
-      meta.textContent = `${run.country_name || run.country_id} · ${run.instruction_variant} · prefix ${run.prefix_length}`;
+    if (meta && summary) {
+      meta.textContent = `${summary.country_name || summary.country_id} · ${summary.instruction_variant} · prefix ${summary.prefix_length}`;
     }
     renderDetail(this.root.querySelector("#capitalsDetail"), {});
   }
@@ -125,13 +123,13 @@ TreeDashboard.CapitalsAdapter = class {
     });
     this.root.querySelector("#capitalsRunSelect")?.addEventListener("change", e => this.loadRun(e.target.value));
     this.root.querySelector("#capitalsProbFilter")?.addEventListener("change", () => {
-      if (this.currentRun) this.loadRun(this.currentRun.tree_key);
+      if (this.currentSummary) this.loadRun(this.currentSummary.tree_key);
     });
     this.root.querySelector("#capitalsFitBtn")?.addEventListener("click", () => this.graph.fitToScreen());
     this.root.querySelector("#capitalsResetBtn")?.addEventListener("click", () => this.graph.resetZoom());
     ["capitalsShowBad", "capitalsShowGood"].forEach(id => {
       this.root.querySelector(`#${id}`)?.addEventListener("change", () => {
-        if (this.currentRun) this.loadRun(this.currentRun.tree_key);
+        if (this.currentSummary) this.loadRun(this.currentSummary.tree_key);
       });
     });
   }
@@ -139,7 +137,14 @@ TreeDashboard.CapitalsAdapter = class {
 
 document.addEventListener("experiment-tab", event => {
   if (event.detail.experiment === "capitals" && !window._capitalsInit) {
-    window._capitalsInit = true;
-    new TreeDashboard.CapitalsAdapter(document.getElementById("capitalsPanel")).init();
+    try {
+      const adapter = new TD.CapitalsAdapter(document.getElementById("capitalsPanel"));
+      window._capitalsInit = true;
+      adapter.init();
+    } catch (err) {
+      const el = document.getElementById("capitalsSource");
+      if (el) el.innerHTML = `<span class="error">${utils.escapeHtml(err.message)}</span>`;
+    }
   }
 });
+})(TreeDashboard);

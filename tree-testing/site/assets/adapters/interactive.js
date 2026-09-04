@@ -1,5 +1,6 @@
 window.TreeDashboard = window.TreeDashboard || {};
-const { DataStore, TreeGraph, SummaryPanel, renderDetail, switchSubTab, utils } = TreeDashboard;
+(function (TD) {
+const { DataStore, TreeGraph, SummaryPanel, renderDetail, switchSubTab, utils } = TD;
 
 const INTERACTIVE_COLUMNS = [
   { key: "prompt_preview", label: "Prompt" },
@@ -12,13 +13,13 @@ const INTERACTIVE_COLUMNS = [
   { key: "prob_good_pct", label: "P(good) %" },
 ];
 
-TreeDashboard.InteractiveAdapter = class {
+TD.InteractiveAdapter = class {
   constructor(root) {
     this.root = root;
     this.store = new DataStore("interactive", "data/interactive");
     this.graph = new TreeGraph("#interactiveGraph", "#interactiveTooltip");
     this.summary = new SummaryPanel(root, INTERACTIVE_COLUMNS);
-    this.currentRun = null;
+    this.currentSummary = null;
     this.tutorial = null;
     this.graph.onSelect = nodeId => this.showNode(nodeId);
   }
@@ -47,17 +48,14 @@ TreeDashboard.InteractiveAdapter = class {
     this.enableViewOnlyMock();
     try {
       await this.store.loadManifest();
+      document.getElementById("interactiveSource").textContent =
+        `View-only demo · ${this.store.manifest.shards?.length || 0} saved trees · generated ${this.store.manifest.generated_at}`;
       const tutorialResp = await fetch("data/interactive/tutorial.json?ts=" + Date.now());
       if (tutorialResp.ok) this.tutorial = await tutorialResp.json();
       if (this.tutorial) this.populateMockForm(this.tutorial);
       this.populateRunSelect();
       this.renderSummary();
       this.bindEvents();
-      document.getElementById("interactiveSource").textContent =
-        `View-only demo · ${this.store.manifest.shards?.length || 0} saved trees · generated ${this.store.manifest.generated_at}`;
-      if (this.tutorial?.shard) {
-        await this.loadTutorialShard();
-      }
     } catch (err) {
       document.getElementById("interactiveSource").innerHTML = `<span class="error">${utils.escapeHtml(err.message)}</span>`;
     }
@@ -80,19 +78,6 @@ TreeDashboard.InteractiveAdapter = class {
     ]);
   }
 
-  async loadTutorialShard() {
-    const shard = this.tutorial.shard;
-    const treeKey = this.tutorial.tree_key;
-    this.store.cache.set(treeKey, shard);
-    this.store.DATA.trees[treeKey] = shard.tree_nodes;
-    this.store.DATA.leaf_completions[treeKey] = shard.leaf_completions;
-    this.store.DATA.node_status[treeKey] = shard.node_status;
-    this.store.DATA.node_stats[treeKey] = shard.node_stats;
-    switchSubTab(this.root, "trees");
-    this.root.querySelector("#interactiveRunSelect").value = treeKey;
-    await this.loadRun(treeKey);
-  }
-
   async openTree(treeKey) {
     switchSubTab(this.root, "trees");
     this.root.querySelector("#interactiveRunSelect").value = treeKey;
@@ -100,9 +85,11 @@ TreeDashboard.InteractiveAdapter = class {
   }
 
   async loadRun(treeKey) {
+    const summary = this.store.summaryFor(treeKey);
+    this.currentSummary = summary;
+    const meta = this.root.querySelector("#interactiveRunMeta");
+    if (meta) meta.textContent = "Loading tree…";
     const shard = await this.store.loadTree(treeKey);
-    const run = (this.store.DATA.runs || []).find(r => r.tree_key === treeKey);
-    this.currentRun = run;
     const nodes = shard.tree_nodes || [];
     const leafMap = new Map(Object.entries(shard.leaf_completions || {}));
     const statusMap = new Map(Object.entries(shard.node_status || {}));
@@ -114,8 +101,9 @@ TreeDashboard.InteractiveAdapter = class {
       showGood: this.root.querySelector("#interactiveShowGood")?.checked !== false,
     });
     await this.graph.draw(nodes, minProb);
-    const meta = this.root.querySelector("#interactiveRunMeta");
-    if (meta && run) meta.textContent = `${run.prompt || ""} · τ=${run.tau} · ${run.model_id}`;
+    if (meta && summary) {
+      meta.textContent = `${summary.prompt || summary.prompt_preview || ""} · τ=${summary.tau} · ${summary.model_id}`;
+    }
     renderDetail(this.root.querySelector("#interactiveDetail"), {});
   }
 
@@ -133,13 +121,13 @@ TreeDashboard.InteractiveAdapter = class {
     });
     this.root.querySelector("#interactiveRunSelect")?.addEventListener("change", e => this.loadRun(e.target.value));
     this.root.querySelector("#interactiveProbFilter")?.addEventListener("change", () => {
-      if (this.currentRun) this.loadRun(this.currentRun.tree_key);
+      if (this.currentSummary) this.loadRun(this.currentSummary.tree_key);
     });
     this.root.querySelector("#interactiveFitBtn")?.addEventListener("click", () => this.graph.fitToScreen());
     this.root.querySelector("#interactiveResetBtn")?.addEventListener("click", () => this.graph.resetZoom());
     ["interactiveShowBad", "interactiveShowGood"].forEach(id => {
       this.root.querySelector(`#${id}`)?.addEventListener("change", () => {
-        if (this.currentRun) this.loadRun(this.currentRun.tree_key);
+        if (this.currentSummary) this.loadRun(this.currentSummary.tree_key);
       });
     });
     this.root.querySelector("#interactiveGenerateBtn")?.addEventListener("click", () => {
@@ -151,12 +139,19 @@ TreeDashboard.InteractiveAdapter = class {
 
 document.addEventListener("experiment-tab", event => {
   if (event.detail.experiment === "interactive" && !window._interactiveInit) {
-    window._interactiveInit = true;
-    new TreeDashboard.InteractiveAdapter(document.getElementById("interactivePanel")).init();
+    try {
+      const adapter = new TD.InteractiveAdapter(document.getElementById("interactivePanel"));
+      window._interactiveInit = true;
+      adapter.init();
+    } catch (err) {
+      const el = document.getElementById("interactiveSource");
+      if (el) el.innerHTML = `<span class="error">${utils.escapeHtml(err.message)}</span>`;
+    }
   }
 });
 
 // Auto-load interactive tab on first visit (default demo)
 document.addEventListener("DOMContentLoaded", () => {
-  TreeDashboard.switchTopTab("interactive");
+  TD.switchTopTab("interactive");
 });
+})(TreeDashboard);

@@ -52,6 +52,10 @@ TreeDashboard.DataStore = class {
     return entry?.file || null;
   }
 
+  summaryFor(treeKey) {
+    return (this.DATA?.tree_summaries || []).find(row => row.tree_key === treeKey) || null;
+  }
+
   async loadTree(treeKey) {
     if (this.cache.has(treeKey)) return this.cache.get(treeKey);
     const file = this.shardFile(treeKey);
@@ -86,7 +90,7 @@ TreeDashboard.switchTopTab = function(name) {
   document.querySelectorAll(".experiment-panel").forEach(panel => {
     panel.classList.toggle("active", panel.id === `${name}Panel`);
   });
-  window.dispatchEvent(new CustomEvent("experiment-tab", { detail: { experiment: name } }));
+  document.dispatchEvent(new CustomEvent("experiment-tab", { detail: { experiment: name } }));
 };
 
 document.addEventListener("DOMContentLoaded", () => {

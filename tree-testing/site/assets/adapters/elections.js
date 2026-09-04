@@ -1,5 +1,6 @@
 window.TreeDashboard = window.TreeDashboard || {};
-const { DataStore, TreeGraph, SummaryPanel, renderDetail, switchSubTab, utils } = TreeDashboard;
+(function (TD) {
+const { DataStore, TreeGraph, SummaryPanel, renderDetail, switchSubTab, utils } = TD;
 
 const ELECTIONS_COLUMNS = [
   { key: "model_id", label: "Model" },
@@ -12,13 +13,13 @@ const ELECTIONS_COLUMNS = [
   { key: "greedy_mention_category", label: "Greedy mention" },
 ];
 
-TreeDashboard.ElectionsAdapter = class {
+TD.ElectionsAdapter = class {
   constructor(root) {
     this.root = root;
     this.store = new DataStore("elections", "data/elections");
     this.graph = new TreeGraph("#electionsGraph", "#electionsTooltip");
     this.summary = new SummaryPanel(root, ELECTIONS_COLUMNS);
-    this.currentRun = null;
+    this.currentSummary = null;
     this.graph.onSelect = nodeId => this.showNode(nodeId);
   }
 
@@ -59,10 +60,11 @@ TreeDashboard.ElectionsAdapter = class {
   }
 
   async loadRun(treeKey) {
+    const summary = this.store.summaryFor(treeKey);
+    this.currentSummary = summary;
+    const meta = this.root.querySelector("#electionsRunMeta");
+    if (meta) meta.textContent = "Loading tree…";
     const shard = await this.store.loadTree(treeKey);
-    const run = (this.store.DATA.runs || []).find(r => r.tree_key === treeKey);
-    const summary = (this.store.DATA.tree_summaries || []).find(s => s.tree_key === treeKey);
-    this.currentRun = run;
     const nodes = shard.tree_nodes || [];
     const leafMap = new Map(Object.entries(shard.leaf_completions || {}));
     const statusMap = new Map(Object.entries(shard.node_status || {}));
@@ -70,8 +72,7 @@ TreeDashboard.ElectionsAdapter = class {
     this.graph.setTreeData({ nodes, leafMap, statusMap, statsMap });
     const minProb = parseFloat(this.root.querySelector("#electionsProbFilter")?.value || "0");
     await this.graph.draw(nodes, minProb);
-    const meta = this.root.querySelector("#electionsRunMeta");
-    if (meta) meta.textContent = summary?.instruction || run?.instruction || treeKey;
+    if (meta) meta.textContent = summary?.instruction || summary?.instruction_variant || treeKey;
     const cand = this.root.querySelector("#electionsCandidates");
     if (cand && shard.candidate_mention_probs) {
       cand.innerHTML = shard.candidate_mention_probs.map(item => `
@@ -95,7 +96,7 @@ TreeDashboard.ElectionsAdapter = class {
     });
     this.root.querySelector("#electionsRunSelect")?.addEventListener("change", e => this.loadRun(e.target.value));
     this.root.querySelector("#electionsProbFilter")?.addEventListener("change", () => {
-      if (this.currentRun) this.loadRun(this.currentRun.tree_key);
+      if (this.currentSummary) this.loadRun(this.currentSummary.tree_key);
     });
     this.root.querySelector("#electionsFitBtn")?.addEventListener("click", () => this.graph.fitToScreen());
     this.root.querySelector("#electionsResetBtn")?.addEventListener("click", () => this.graph.resetZoom());
@@ -104,7 +105,14 @@ TreeDashboard.ElectionsAdapter = class {
 
 document.addEventListener("experiment-tab", event => {
   if (event.detail.experiment === "elections" && !window._electionsInit) {
-    window._electionsInit = true;
-    new TreeDashboard.ElectionsAdapter(document.getElementById("electionsPanel")).init();
+    try {
+      const adapter = new TD.ElectionsAdapter(document.getElementById("electionsPanel"));
+      window._electionsInit = true;
+      adapter.init();
+    } catch (err) {
+      const el = document.getElementById("electionsSource");
+      if (el) el.innerHTML = `<span class="error">${utils.escapeHtml(err.message)}</span>`;
+    }
   }
 });
+})(TreeDashboard);

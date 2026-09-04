@@ -1,7 +1,8 @@
 window.TreeDashboard = window.TreeDashboard || {};
-const { utils } = TreeDashboard;
+(function (TD) {
+const { utils } = TD;
 
-TreeDashboard.TreeGraph = class {
+TD.TreeGraph = class {
   constructor(svgSelector, tooltipSelector) {
     this.svg = d3.select(svgSelector);
     this.gRoot = this.svg.append("g");
@@ -194,3 +195,4 @@ TreeDashboard.TreeGraph = class {
     this.expansionMap = expansionMap || new Map();
   }
 };
+})(TreeDashboard);

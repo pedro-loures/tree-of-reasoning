@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Interactive Tree Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0f1117;
+    --panel: #1a1d27;
+    --text: #e8eaed;
+    --muted: #9aa0a6;
+    --border: #2d3142;
+    --accent: #6ea8fe;
+    --bad: #e57373;
+    --bad-node: #c62828;
+    --mostly-bad: #f4a261;
+    --good: #7dcea0;
+    --good-node: #2e7d32;
+    --ditched: #5c6370;
+    --internal: #3d4459;
+    --leaf: #888;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  h1 { margin: 0 0 4px; font-size: 20px; }
+  .tabs { display: flex; gap: 8px; margin-top: 12px; }
+  .tab-btn {
+    background: #222; color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 14px; cursor: pointer;
+  }
+  .tab-btn.active { border-color: var(--accent); background: #1e2a3d; color: var(--accent); }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .layout { display: grid; grid-template-columns: 1fr minmax(320px, 420px); height: calc(100vh - 220px); }
+  .graph-wrap { position: relative; overflow: hidden; border-right: 1px solid var(--border); }
+  #graph { width: 100%; height: 100%; cursor: grab; }
+  #graph:active { cursor: grabbing; }
+  .sidebar { overflow-y: auto; padding: 14px; background: var(--panel); }
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+  label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  select, button, input, textarea {
+    background: #222; color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 10px; font: inherit;
+  }
+  textarea { min-height: 72px; resize: vertical; width: 100%; font-family: inherit; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: #1e2a3d; border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .card { background: #12151c; border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+  .card h3 { margin: 0 0 8px; font-size: 13px; }
+  .leaf-card { border-left: 4px solid var(--leaf); }
+  .leaf-card.correct { border-left-color: var(--good); }
+  .leaf-card.incorrect { border-left-color: var(--bad); }
+  .answer { font-size: 13px; line-height: 1.45; word-break: break-word; }
+  .reasoning-section { margin-top: 10px; }
+  .reasoning-label {
+    margin: 0 0 6px; font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);
+  }
+  .reasoning-block {
+    margin: 0; padding: 10px 12px; max-height: min(48vh, 520px); overflow: auto;
+    background: #0a0c10; border: 1px solid var(--border); border-radius: 8px;
+    font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre-wrap; word-break: break-word; color: #d6dae3;
+  }
+  .reasoning-block.compact { max-height: 220px; font-size: 11px; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; margin-right: 4px; }
+  .pill.yes { background: #16361f; color: var(--good); }
+  .pill.no { background: #3a1717; color: var(--bad); }
+  .pill.bad-node { background: #4a1515; color: #ff8a80; }
+  .pill.mostly-bad { background: #4a3510; color: var(--mostly-bad); }
+  .pill.good-node { background: #16361f; color: var(--good-node); }
+  .pill.ditched { background: #2a2d36; color: var(--muted); }
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+  .legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  #tooltip {
+    position: fixed; pointer-events: none; z-index: 100;
+    background: #1e2230; border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; font-size: 12px; max-width: 380px; display: none;
+    box-shadow: 0 8px 24px rgba(0,0,0,.45);
+  }
+  #tooltip .tok { font-family: ui-monospace, monospace; font-size: 13px; margin-bottom: 4px; }
+  .error { color: var(--bad); }
+  .toolbar { display: flex; gap: 12px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
+  .toolbar label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  input[type="checkbox"] { accent-color: var(--accent); }
+  .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px; }
+  .stat { background: #0f1117; border-radius: 6px; padding: 8px; text-align: center; }
+  .stat strong { display: block; font-size: 17px; }
+  .summary-wrap { padding: 20px; max-width: 1400px; margin: 0 auto; }
+  .summary-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 16px; }
+  .summary-table-wrap { overflow-x: auto; margin-bottom: 24px; max-width: 100%; }
+  table.summary { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+  table.summary th, table.summary td {
+    border: 1px solid var(--border); padding: 8px 10px; text-align: right; background: var(--bg);
+  }
+  table.summary th { background: var(--panel); color: var(--muted); font-weight: 600; cursor: pointer; user-select: none; }
+  table.summary th.frozen, table.summary td.frozen { position: sticky; z-index: 2; }
+  table.summary th.frozen { z-index: 4; background: var(--panel); }
+  table.summary td.frozen { background: var(--bg); }
+  table.summary th.frozen-last, table.summary td.frozen-last { box-shadow: 4px 0 8px rgba(0,0,0,.35); }
+  table.summary th.highlight, table.summary td.highlight { background: #151b28; color: #cfe0ff; }
+  table.summary tr:hover td { background: #151922; }
+  table.summary tr.clickable { cursor: pointer; }
+  .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+  .chart-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+  .chart-card h3 { margin: 0 0 8px; font-size: 13px; }
+  .chart { width: 100%; height: 280px; }
+  .generate-panel {
+    display: grid; grid-template-columns: 1fr auto; gap: 12px; margin-top: 12px;
+    padding-top: 12px; border-top: 1px solid var(--border);
+  }
+  .generate-fields { display: grid; gap: 10px; }
+  .generate-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+  .generate-actions { display: flex; flex-direction: column; gap: 8px; justify-content: end; }
+  .status-line { min-height: 18px; }
+  .progress-wrap { margin-top: 8px; display: none; }
+  .progress-wrap.active { display: block; }
+  .progress-track {
+    height: 10px; border-radius: 999px; background: #12151c;
+    border: 1px solid var(--border); overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%; width: 0%; background: linear-gradient(90deg, #3d5a8a, var(--accent));
+    transition: width 0.25s ease;
+  }
+  .progress-meta {
+    display: flex; justify-content: space-between; gap: 12px;
+    margin-top: 6px; font-size: 12px; color: var(--muted);
+  }
+  @media (max-width: 1100px) {
+    .chart-row { grid-template-columns: 1fr; }
+    .layout { grid-template-columns: 1fr; height: auto; min-height: 70vh; }
+    .generate-panel { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Interactive Tree Dashboard</h1>
+  <p class="muted" id="source">Enter a prompt to build a τ-tree and classify good/bad nodes.</p>
+  <div class="generate-panel">
+    <div class="generate-fields">
+      <label>Prompt
+        <textarea id="promptInput" placeholder="What is the capital of Brazil?"></textarea>
+      </label>
+      <div class="generate-row">
+        <label>Expected answers <span class="muted">(comma-separated; optional Answer logic below)</span>
+          <input id="expectedAnswers" type="text" placeholder="Brasília, Brasilia" style="min-width:220px" />
+        </label>
+        <label id="answerModeLabel" class="answer-mode-label">Answer logic
+          <select id="answerModeSelect">
+            <option value="or" selected>OR — any answer matches</option>
+            <option value="and">AND — all answers must match</option>
+            <option value="xor">XOR — exactly one answer matches</option>
+            <option value="categories">Categories — independent checks (use | for synonyms)</option>
+          </select>
+        </label>
+        <label>Model
+          <select id="modelSelect"></select>
+        </label>
+        <label>τ (tau)
+          <select id="tauSelect">
+            <option value="0.001">0.001</option>
+            <option value="0.01" selected>0.01</option>
+            <option value="0.05">0.05</option>
+            <option value="0.1">0.1</option>
+          </select>
+        </label>
+      </div>
+      <p class="status-line muted" id="generateStatus"></p>
+      <div class="progress-wrap" id="progressWrap">
+        <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+        <div class="progress-meta">
+          <span id="progressStage">—</span>
+          <span id="progressPercent">0%</span>
+        </div>
+      </div>
+    </div>
+    <div class="generate-actions">
+      <button type="button" class="primary" id="generateBtn">Generate tree</button>
+      <button type="button" id="saveAllBtn">Save all trees</button>
+      <button type="button" id="clearBtn">Clear all trees</button>
+    </div>
+  </div>
+  <div class="tabs">
+    <button type="button" class="tab-btn active" data-tab="summary">Summary</button>
+    <button type="button" class="tab-btn" data-tab="trees">Tree Explorer</button>
+  </div>
+</header>
+
+<div id="summaryPanel" class="panel active">
+  <div class="summary-wrap">
+    <div class="stat-grid" id="globalStats"></div>
+    <div class="summary-controls">
+      <label>Saved trees
+        <select id="savedSelectSummary"><option value="">Load saved…</option></select>
+      </label>
+      <button type="button" id="loadSavedSummaryBtn">Load</button>
+      <button type="button" id="loadAllSavedBtn">Load all saved</button>
+      <label>Model filter
+        <select id="modelFilter"><option value="">All models</option></select>
+      </label>
+      <label>τ filter
+        <select id="tauFilter"><option value="">All τ</option></select>
+      </label>
+      <label>Bar chart column
+        <select id="metricSelect"></select>
+      </label>
+      <label>Scatter X
+        <select id="scatterX"></select>
+      </label>
+      <label>Scatter Y
+        <select id="scatterY"></select>
+      </label>
+    </div>
+    <p class="muted" id="filterHint" style="margin:0 0 12px"></p>
+    <div class="chart-row">
+      <div class="chart-card">
+        <h3 id="barChartTitle">Metric by tree</h3>
+        <svg class="chart" id="barChart"></svg>
+      </div>
+      <div class="chart-card">
+        <h3 id="scatterChartTitle">Scatter</h3>
+        <svg class="chart" id="scatterChart"></svg>
+      </div>
+    </div>
+    <div class="summary-table-wrap">
+      <table class="summary" id="summaryTable"><thead></thead><tbody></tbody></table>
+    </div>
+  </div>
+</div>
+
+<div id="treesPanel" class="panel">
+  <div style="padding:12px 20px;border-bottom:1px solid var(--border)">
+    <div class="controls">
+      <label>Tree
+        <select id="runSelect"></select>
+      </label>
+      <button type="button" id="saveTreeBtn">Save tree</button>
+      <label>Saved trees
+        <select id="savedSelect"><option value="">Load saved…</option></select>
+      </label>
+      <button type="button" id="loadSavedBtn">Load</button>
+      <label>Min edge prob
+        <select id="probFilter">
+          <option value="0">0 (show all)</option>
+          <option value="0.001">0.001</option>
+          <option value="0.01">0.01 (τ)</option>
+          <option value="0.05">0.05</option>
+        </select>
+      </label>
+      <div class="toolbar">
+        <label><input type="checkbox" id="showBad" checked /> Bad nodes (red)</label>
+        <label><input type="checkbox" id="showGood" checked /> Good nodes (green)</label>
+        <label><input type="checkbox" id="dimOther" /> Dim other nodes</label>
+        <button type="button" id="fitBtn">Fit to screen</button>
+        <button type="button" id="resetBtn">Reset zoom</button>
+      </div>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--bad-node)"></i> 100% bad</span>
+      <span><i style="background:var(--mostly-bad)"></i> &gt;75% bad</span>
+      <span><i style="background:var(--good-node)"></i> 100% good</span>
+      <span><i style="background:var(--internal)"></i> mixed</span>
+    </div>
+  </div>
+  <div class="layout">
+    <div class="graph-wrap">
+      <svg id="graph"></svg>
+      <div id="tooltip"></div>
+    </div>
+    <aside class="sidebar">
+      <div class="card">
+        <h3>Tree summary</h3>
+        <div id="runMeta" class="muted">—</div>
+        <div class="stat-grid" id="statGrid"></div>
+      </div>
+      <div class="card">
+        <h3>Rescore answers</h3>
+        <label>Expected answers
+          <input id="rescoreAnswers" type="text" placeholder="Brasília, Brasilia" />
+        </label>
+        <label id="rescoreModeLabel" class="answer-mode-label">Answer logic
+          <select id="rescoreModeSelect">
+            <option value="or">OR — any answer matches</option>
+            <option value="and">AND — all answers must match</option>
+            <option value="xor">XOR — exactly one answer matches</option>
+            <option value="categories">Categories — independent checks (use | for synonyms)</option>
+          </select>
+        </label>
+        <p class="muted" style="margin:8px 0 0">Leave blank to score by reasoning completion only.</p>
+        <button type="button" class="primary" id="rescoreBtn" style="margin-top:10px">Apply scoring</button>
+      </div>
+      <h2 style="font-size:14px; margin:0 0 8px" id="detailTitle">Selected node</h2>
+      <div id="detailPanel"><p class="muted">Click a node in the graph or a table row.</p></div>
+    </aside>
+  </div>
+</div>
+
+<script src="/assets/interactive_dashboard.js?v=3"></script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Experiment outputs (never commit to main)
+results/
+output/
+docs/
+tree-shift-analysis/output/
+*.jsonl
+*.log
+
+# Large / generated dashboard data
+**/dashboard_sessions/
+**/capitals_dashboard.json
+**/president_dashboard.json
+**/data/capitals/trees/
+**/data/elections/trees/
+**/data/interactive/trees/
+
+# Data files
+data/tse/*.zip
+data/tse/consulta_cand_*.csv
+**/embeddings/
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+.ipynb_checkpoints/

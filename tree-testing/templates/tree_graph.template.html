@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>τ-Tree Graph Viewer</title>
+<script src="d3.min.js"></script>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0f1117;
+    --panel: #1a1d27;
+    --text: #e8eaed;
+    --muted: #9aa0a6;
+    --border: #2d3142;
+    --accent: #6ea8fe;
+    --topk-1: #f4a261;
+    --topk-2: #e9c46a;
+    --topk-3: #2a9d8f;
+    --topk-4: #457b9d;
+    --topk-5: #9b5de5;
+    --correct: #7dcea0;
+    --incorrect: #e57373;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 16px 20px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  h1 { margin: 0 0 4px; font-size: 20px; }
+  .layout { display: grid; grid-template-columns: 1fr 340px; height: calc(100vh - 88px); }
+  .graph-wrap { position: relative; overflow: hidden; border-right: 1px solid var(--border); }
+  #graph { width: 100%; height: 100%; cursor: grab; }
+  #graph:active { cursor: grabbing; }
+  .sidebar { overflow-y: auto; padding: 16px; background: var(--panel); }
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+  label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  select, button { background: #222; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
+  button:hover { border-color: var(--accent); }
+  .muted { color: var(--muted); font-size: 12px; }
+  .card { background: #12151c; border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+  .card h3 { margin: 0 0 8px; font-size: 13px; }
+  .leaf-card { border-left: 4px solid var(--accent); }
+  .leaf-card.correct { border-left-color: var(--correct); }
+  .leaf-card.incorrect { border-left-color: var(--incorrect); }
+  .node-card { border-left: 4px solid var(--accent); }
+  .node-card.selected { border-left-color: var(--accent); }
+  .rank { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; margin-bottom: 6px; }
+  .answer { font-size: 13px; line-height: 1.45; word-break: break-word; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; }
+  .pill.yes { background: #16361f; color: var(--correct); }
+  .pill.no { background: #3a1717; color: var(--incorrect); }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+  .legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  #tooltip {
+    position: fixed; pointer-events: none; z-index: 100;
+    background: #1e2230; border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; font-size: 12px; max-width: min(520px, 90vw); display: none;
+    box-shadow: 0 8px 24px rgba(0,0,0,.45);
+  }
+  #tooltip .tok { font-family: ui-monospace, monospace; font-size: 13px; margin-bottom: 4px; }
+  #tooltip .path {
+    margin-top: 8px; font-family: ui-monospace, monospace; font-size: 11px;
+    line-height: 1.45; color: var(--text); white-space: pre-wrap; word-break: break-word;
+    max-height: 240px; overflow-y: auto;
+  }
+  .error { color: var(--incorrect); }
+  .toolbar { display: flex; gap: 8px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>τ-Pruned Reasoning Tree</h1>
+  <p class="muted" id="source">Loading…</p>
+  <div class="controls">
+    <label>Run
+      <select id="runSelect"></select>
+    </label>
+    <label>Min edge prob
+      <select id="probFilter">
+        <option value="0">0 (show all)</option>
+        <option value="0.001">0.001</option>
+        <option value="0.01">0.01 (τ)</option>
+        <option value="0.05">0.05</option>
+        <option value="0.1">0.1</option>
+      </select>
+    </label>
+    <div class="toolbar">
+      <button type="button" id="fitBtn">Fit to screen</button>
+      <button type="button" id="resetBtn">Reset zoom</button>
+    </div>
+  </div>
+  <div class="legend" id="legend"></div>
+</header>
+
+<div class="layout">
+  <div class="graph-wrap">
+    <svg id="graph"></svg>
+    <div id="tooltip"></div>
+  </div>
+  <aside class="sidebar">
+    <div class="card">
+      <h3>Run summary</h3>
+      <div id="runMeta" class="muted">—</div>
+    </div>
+    <h2 style="font-size:14px; margin:0 0 8px">Selected node</h2>
+    <div id="nodePanel"></div>
+    <h2 style="font-size:14px; margin:16px 0 8px">Top-k leaf answers</h2>
+    <div id="topkPanel"></div>
+  </aside>
+</div>
+
+<script>
+const MODEL_LABELS = {"deepseek-r1-7b":"DeepSeek-R1-7B","qwq-32b-awq":"QwQ-32B-AWQ"};
+const TOPK_COLORS = ["var(--topk-1)","var(--topk-2)","var(--topk-3)","var(--topk-4)","var(--topk-5)"];
+
+let DATA = null;
+let currentRun = null;
+let currentNodes = [];
+let currentRootPrefix = "";
+let selectedNodeId = null;
+let topkMap = new Map();
+let zoomBehavior = null;
+let svg = null;
+let gRoot = null;
+
+function displayToken(token) {
+  if (!token) return "⟨prompt⟩";
+  if (token === "\n") return "\\n";
+  if (token === "\t") return "\\t";
+  if (token === " ") return "·";
+  return token;
+}
+
+function fmtProb(p) {
+  if (p >= 0.0001) return p.toFixed(4);
+  return p.toExponential(2);
+}
+
+function buildParentMap(nodes) {
+  const parent = {};
+  for (const n of nodes) {
+    for (const c of n.c || []) parent[c] = n.id;
+  }
+  return parent;
+}
+
+function reasoningToNode(nodeId, nodes) {
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  if (nodeId === "root") return "";
+  const node = byId[nodeId];
+  if (node?.suffix) return node.suffix;
+  const parent = buildParentMap(nodes);
+  const tokens = [];
+  let cur = nodeId;
+  while (cur && cur !== "root") {
+    const n = byId[cur];
+    if (n?.tok) tokens.unshift(n.tok);
+    cur = parent[cur];
+  }
+  return tokens.join("");
+}
+
+function treePositions(nodes, rootId = "root") {
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+
+  function leafIds(nodeId) {
+    const node = byId[nodeId];
+    if (!node.c || !node.c.length) return [nodeId];
+    return node.c.flatMap(leafIds);
+  }
+
+  const leafOrder = leafIds(rootId);
+  const leafX = Object.fromEntries(leafOrder.map((id, i) => [id, i]));
+  const positions = {};
+
+  function assign(nodeId) {
+    const node = byId[nodeId];
+    let x;
+    if (!node.c || !node.c.length) {
+      x = leafX[nodeId];
+    } else {
+      x = node.c.reduce((sum, cid) => sum + assign(cid), 0) / node.c.length;
+    }
+    positions[nodeId] = { x, y: -node.d };
+    return x;
+  }
+
+  assign(rootId);
+  return positions;
+}
+
+function buildEdges(nodes, positions, minProb) {
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  const edges = [];
+  for (const node of nodes) {
+    for (const childId of node.c || []) {
+      const child = byId[childId];
+      if (!child || child.p < minProb) continue;
+      edges.push({
+        source: node.id,
+        target: childId,
+        prob: child.p,
+        token: child.tok || "?",
+      });
+    }
+  }
+  return edges;
+}
+
+function visibleNodeIds(edges) {
+  const ids = new Set(["root"]);
+  edges.forEach(e => { ids.add(e.source); ids.add(e.target); });
+  return ids;
+}
+
+function renderLegend(topk) {
+  const el = document.getElementById("legend");
+  el.innerHTML = [
+  '<span><i style="background:#555"></i> internal node</span>',
+  '<span><i style="background:#888"></i> leaf</span>',
+  ...topk.map((item, i) =>
+    `<span><i style="background:${TOPK_COLORS[i]}"></i> top-${item.rank} leaf</span>`
+  ),
+  ].join("");
+}
+
+function renderNodePanel() {
+  const panel = document.getElementById("nodePanel");
+  if (!selectedNodeId) {
+    panel.innerHTML = "<p class=\"muted\">Click a node in the graph.</p>";
+    return;
+  }
+  const byId = Object.fromEntries(currentNodes.map(n => [n.id, n]));
+  const node = byId[selectedNodeId];
+  if (!node) {
+    panel.innerHTML = "<p class=\"muted\">Node not visible at current filter.</p>";
+    return;
+  }
+  const rank = topkMap.get(selectedNodeId);
+  const reasoning = reasoningToNode(selectedNodeId, currentNodes);
+  const tokenLabel = selectedNodeId === "root"
+    ? "⟨reasoning root⟩"
+    : escapeHtml(displayToken(node.tok));
+  let html = `<div class="card node-card selected">`;
+  html += `<div class="muted">id: ${selectedNodeId} · depth ${node.d}</div>`;
+  html += `<div style="margin-top:6px;font-weight:600">${tokenLabel}</div>`;
+  html += `<div class="muted" style="margin-top:4px">path prob: ${fmtProb(node.p)}</div>`;
+  html += `<div class="path" style="margin-top:8px">${escapeHtml(reasoning || "⟨start of reasoning⟩")}</div>`;
+  if (node.ct) html += `<div class="muted" style="margin-top:8px">children: ${node.ct.map(displayToken).join(", ")}</div>`;
+  if (rank) {
+    html += `<div style="margin-top:8px;color:${TOPK_COLORS[rank.colorIndex]}">Top-${rank.rank} leaf</div>`;
+    html += `<div>${escapeHtml(rank.answer_text || "(no answer)")}</div>`;
+  }
+  html += "</div>";
+  panel.innerHTML = html;
+}
+
+function renderTopkPanel(topk) {
+  const panel = document.getElementById("topkPanel");
+  if (!topk.length) {
+    panel.innerHTML = '<p class="muted">No top-k completions for this run.</p>';
+    return;
+  }
+  panel.innerHTML = topk.map((item, i) => `
+    <div class="card leaf-card ${item.answer_correct ? "correct" : "incorrect"}" data-leaf="${item.leaf_id}">
+      <span class="rank" style="background:${TOPK_COLORS[i]}22;color:${TOPK_COLORS[i]}">Top-${item.rank}</span>
+      <div class="muted">leaf ${item.leaf_id} · p=${fmtProb(item.path_prob)}</div>
+      <div class="answer">${item.answer_text ? escapeHtml(item.answer_text) : "<em class='muted'>no answer extracted</em>"}</div>
+      <div style="margin-top:8px">
+        <span class="pill ${item.answer_correct ? "yes" : "no"}">${item.answer_correct ? "correct" : "incorrect"}</span>
+        ${item.reasoning_complete ? '<span class="pill yes">reasoning complete</span>' : '<span class="pill no">incomplete</span>'}
+      </div>
+    </div>
+  `).join("");
+
+  panel.querySelectorAll(".leaf-card").forEach(card => {
+    card.addEventListener("mouseenter", () => highlightLeaf(card.dataset.leaf, true));
+    card.addEventListener("mouseleave", () => highlightLeaf(card.dataset.leaf, false));
+    card.addEventListener("click", () => {
+      selectedNodeId = card.dataset.leaf;
+      renderNodePanel();
+      focusLeaf(card.dataset.leaf);
+    });
+  });
+}
+
+function escapeHtml(text) {
+  return text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+function renderRunMeta(run) {
+  document.getElementById("runMeta").innerHTML = [
+    `<div><strong>${MODEL_LABELS[run.model_id] || run.model_id}</strong></div>`,
+    `<div>prefix ${run.prefix_length} · seed ${run.seed}</div>`,
+    `<div>${run.total_nodes} nodes · mass above τ = ${fmtProb(run.mass_above_tau)}</div>`,
+  ].join("");
+}
+
+function highlightLeaf(leafId, on) {
+  gRoot.selectAll(".node")
+    .attr("stroke-width", d => d.id === leafId && on ? 3 : (d.id === selectedNodeId ? 2 : (topkMap.has(d.id) ? 2 : 1)))
+    .attr("opacity", d => {
+      if (!on) return 1;
+      return d.id === leafId || isAncestorOf(currentNodes, d.id, leafId) ? 1 : 0.25;
+    });
+  gRoot.selectAll(".link")
+    .attr("opacity", d => {
+      if (!on) return 0.85;
+      return isOnPath(currentNodes, d.source.id, d.target.id, leafId) ? 1 : 0.12;
+    });
+}
+
+function isAncestorOf(nodes, ancestorId, leafId) {
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  let current = leafId;
+  while (current && current !== "root") {
+    if (current === ancestorId) return true;
+    const node = byId[current];
+    if (!node) break;
+    const parent = nodes.find(n => (n.c || []).includes(current));
+    current = parent ? parent.id : null;
+  }
+  return ancestorId === "root";
+}
+
+function isOnPath(nodes, sourceId, targetId, leafId) {
+  const path = [];
+  let current = leafId;
+  while (current) {
+    path.push(current);
+    const parent = nodes.find(n => (n.c || []).includes(current));
+    current = parent ? parent.id : null;
+  }
+  return path.includes(sourceId) && path.includes(targetId);
+}
+
+function focusLeaf(leafId) {
+  const node = gRoot.selectAll(".node").filter(d => d.id === leafId);
+  if (node.empty()) return;
+  const [[x, y]] = node.data().map(d => [d.sx, d.sy]);
+  const width = svg.node().clientWidth;
+  const height = svg.node().clientHeight;
+  svg.transition().duration(500).call(
+    zoomBehavior.transform,
+    d3.zoomIdentity.translate(width / 2, height / 2).scale(1.5).translate(-x, -y)
+  );
+  highlightLeaf(leafId, true);
+  setTimeout(() => highlightLeaf(leafId, false), 2000);
+}
+
+function drawGraph(nodes, topk, minProb) {
+  topkMap = new Map(topk.map((item, i) => [item.leaf_id, { ...item, colorIndex: i }]));
+  currentNodes = nodes;
+
+  const positions = treePositions(nodes);
+  const edges = buildEdges(nodes, positions, minProb);
+  const visible = visibleNodeIds(edges);
+  const graphNodes = nodes
+    .filter(n => visible.has(n.id))
+    .map(n => ({ ...n, ...positions[n.id] }));
+
+  const width = svg.node().clientWidth;
+  const height = svg.node().clientHeight;
+
+  const xs = graphNodes.map(n => n.x);
+  const ys = graphNodes.map(n => n.y);
+  const padX = Math.max((Math.max(...xs) - Math.min(...xs)) * 0.08, 1);
+  const padY = Math.max((Math.max(...ys) - Math.min(...ys)) * 0.08, 1);
+  const xScale = d => (d - Math.min(...xs) + padX) * 28;
+  const yScale = d => (d - Math.min(...ys) + padY) * 60;
+
+  graphNodes.forEach(n => { n.sx = xScale(n.x); n.sy = yScale(n.y); });
+
+  const byId = Object.fromEntries(graphNodes.map(n => [n.id, n]));
+  const links = edges
+    .filter(e => byId[e.source] && byId[e.target])
+    .map(e => ({
+      ...e,
+      sx: byId[e.source].sx,
+      sy: byId[e.source].sy,
+      tx: byId[e.target].sx,
+      ty: byId[e.target].sy,
+    }));
+
+  const maxProb = Math.max(...links.map(l => l.prob), 1e-9);
+
+  gRoot.selectAll("*").remove();
+
+  const link = gRoot.selectAll(".link")
+    .data(links, d => `${d.source}-${d.target}`)
+    .join("line")
+    .attr("class", "link")
+    .attr("x1", d => d.sx)
+    .attr("y1", d => d.sy)
+    .attr("x2", d => d.tx)
+    .attr("y2", d => d.ty)
+    .attr("stroke", d => {
+      const rank = topkMap.get(d.target);
+      return rank ? TOPK_COLORS[rank.colorIndex] : "#555";
+    })
+    .attr("stroke-width", d => 0.8 + 5 * (d.prob / maxProb))
+    .attr("stroke-opacity", 0.85)
+    .attr("stroke-linecap", "round");
+
+  const node = gRoot.selectAll(".node")
+    .data(graphNodes, d => d.id)
+    .join("g")
+    .attr("class", "node")
+    .attr("transform", d => `translate(${d.sx},${d.sy})`);
+
+  node.append("circle")
+    .attr("r", d => topkMap.has(d.id) ? 7 : (d.c && d.c.length ? 4 : 5))
+    .attr("fill", d => {
+      const rank = topkMap.get(d.id);
+      if (d.id === selectedNodeId) return "#6ea8fe";
+      if (rank) return TOPK_COLORS[rank.colorIndex];
+      return d.c && d.c.length ? "#3d4459" : "#888";
+    })
+    .attr("stroke", d => (d.id === selectedNodeId || topkMap.has(d.id)) ? "#fff" : "#222")
+    .attr("stroke-width", d => (d.id === selectedNodeId || topkMap.has(d.id)) ? 2 : 1);
+
+  node.append("text")
+    .attr("dy", d => (d.c && d.c.length ? -10 : 14))
+    .attr("text-anchor", "middle")
+    .attr("fill", "#ccc")
+    .attr("font-size", d => topkMap.has(d.id) ? "11px" : "10px")
+    .attr("font-family", "ui-monospace, monospace")
+    .text(d => {
+      if (d.id === "root") return "prompt";
+      const tok = displayToken(d.tok);
+      return tok.length > 14 ? tok.slice(0, 12) + "…" : tok;
+    });
+
+  node.append("text")
+    .attr("dy", d => (d.c && d.c.length ? -22 : 26))
+    .attr("text-anchor", "middle")
+    .attr("fill", "#6ea8fe")
+    .attr("font-size", "9px")
+    .text(d => fmtProb(d.p));
+
+  link.append("title").text(d => `${displayToken(d.token)} · p=${fmtProb(d.prob)}`);
+
+  const tooltip = document.getElementById("tooltip");
+
+  node.on("click", (event, d) => {
+    event.stopPropagation();
+    selectedNodeId = d.id;
+    renderNodePanel();
+    gRoot.selectAll(".node circle")
+      .attr("fill", n => {
+        const rank = topkMap.get(n.id);
+        if (n.id === selectedNodeId) return "#6ea8fe";
+        if (rank) return TOPK_COLORS[rank.colorIndex];
+        return n.c && n.c.length ? "#3d4459" : "#888";
+      })
+      .attr("stroke-width", n => (n.id === selectedNodeId || topkMap.has(n.id)) ? 2 : 1);
+  });
+
+  node.on("mouseenter", (event, d) => {
+    const rank = topkMap.get(d.id);
+    let html = `<div class="tok">${escapeHtml(displayToken(d.id === "root" ? null : d.tok))}</div>`;
+    html += `<div>id: ${d.id} · depth ${d.d}</div>`;
+    html += `<div>path prob: ${fmtProb(d.p)}</div>`;
+    const reasoning = reasoningToNode(d.id, currentNodes);
+    html += `<div class="path">${escapeHtml(reasoning || "⟨start of reasoning⟩")}</div>`;
+    if (d.ct) html += `<div>children: ${d.ct.map(displayToken).join(", ")}</div>`;
+    if (rank) {
+      html += `<div style="margin-top:6px;color:${TOPK_COLORS[rank.colorIndex]}">Top-${rank.rank} leaf</div>`;
+      html += `<div>${escapeHtml(rank.answer_text || "(no answer)")}</div>`;
+    }
+    tooltip.innerHTML = html;
+    tooltip.style.display = "block";
+  }).on("mousemove", event => {
+    tooltip.style.left = (event.clientX + 14) + "px";
+    tooltip.style.top = (event.clientY + 14) + "px";
+  }).on("mouseleave", () => {
+    tooltip.style.display = "none";
+  });
+
+  fitToScreen();
+}
+
+function fitToScreen() {
+  const bounds = gRoot.node().getBBox();
+  const width = svg.node().clientWidth;
+  const height = svg.node().clientHeight;
+  const midX = bounds.x + bounds.width / 2;
+  const midY = bounds.y + bounds.height / 2;
+  const scale = 0.9 / Math.max(bounds.width / width, bounds.height / height);
+  svg.transition().duration(400).call(
+    zoomBehavior.transform,
+    d3.zoomIdentity.translate(width / 2, height / 2).scale(scale).translate(-midX, -midY)
+  );
+}
+
+function loadRun(treeKey) {
+  const run = DATA.runs.find(r => r.tree_key === treeKey);
+  const nodes = DATA.trees[treeKey];
+  if (!run || !nodes) return;
+
+  currentRun = run;
+  const topk = run.top_k_completions || [];
+  currentRootPrefix = DATA.root_prefix || "";
+  selectedNodeId = null;
+  renderRunMeta(run);
+  renderNodePanel();
+  renderTopkPanel(topk);
+  renderLegend(topk);
+
+  const minProb = parseFloat(document.getElementById("probFilter").value);
+  drawGraph(nodes, topk, minProb);
+}
+
+function init() {
+  svg = d3.select("#graph");
+  gRoot = svg.append("g");
+
+  zoomBehavior = d3.zoom()
+    .scaleExtent([0.05, 8])
+    .on("zoom", event => gRoot.attr("transform", event.transform));
+
+  svg.call(zoomBehavior);
+
+  document.getElementById("fitBtn").addEventListener("click", fitToScreen);
+  document.getElementById("resetBtn").addEventListener("click", () => {
+    svg.transition().duration(300).call(zoomBehavior.transform, d3.zoomIdentity);
+  });
+
+  const runSelect = document.getElementById("runSelect");
+  DATA.runs.forEach(run => {
+    const opt = document.createElement("option");
+    opt.value = run.tree_key;
+    opt.textContent = `${MODEL_LABELS[run.model_id] || run.model_id} · prefix ${run.prefix_length} · seed ${run.seed}`;
+    runSelect.appendChild(opt);
+  });
+
+  runSelect.addEventListener("change", () => loadRun(runSelect.value));
+  document.getElementById("probFilter").addEventListener("change", () => {
+    if (currentRun) loadRun(currentRun.tree_key);
+  });
+
+  document.getElementById("source").textContent =
+    `Source: ${DATA.source} · ${DATA.runs.length} runs · edge width ∝ path probability`;
+
+  loadRun(runSelect.value);
+}
+
+fetch("canvas_trees.json")
+  .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); })
+  .then(data => { DATA = data; init(); })
+  .catch(err => {
+    document.getElementById("source").innerHTML =
+      `<span class="error">Failed to load canvas_trees.json: ${err.message}. Serve output/ via HTTP.</span>`;
+  });
+</script>
+</body>
+</html>

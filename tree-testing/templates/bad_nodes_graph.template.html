@@ -1,0 +1,1183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bad &amp; Good Node Explorer</title>
+<script src="d3.min.js"></script>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0f1117;
+    --panel: #1a1d27;
+    --text: #e8eaed;
+    --muted: #9aa0a6;
+    --border: #2d3142;
+    --accent: #6ea8fe;
+    --bad: #e57373;
+    --bad-node: #c62828;
+    --mostly-bad: #f4a261;
+    --good: #7dcea0;
+    --good-node: #2e7d32;
+    --ditched: #5c6370;
+    --internal: #3d4459;
+    --leaf: #888;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  h1 { margin: 0 0 4px; font-size: 20px; }
+  .tabs { display: flex; gap: 8px; margin-top: 12px; }
+  .tab-btn {
+    background: #222; color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 14px; cursor: pointer;
+  }
+  .tab-btn.active { border-color: var(--accent); background: #1e2a3d; color: var(--accent); }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .layout { display: grid; grid-template-columns: 1fr 300px; height: calc(100vh - 120px); }
+  .graph-wrap { position: relative; overflow: hidden; border-right: 1px solid var(--border); }
+  #graph { width: 100%; height: 100%; cursor: grab; }
+  #graph:active { cursor: grabbing; }
+  .sidebar { overflow-y: auto; padding: 14px; background: var(--panel); }
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+  label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  select, button { background: #222; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
+  button:hover { border-color: var(--accent); }
+  .muted { color: var(--muted); font-size: 12px; }
+  .card { background: #12151c; border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+  .card h3 { margin: 0 0 8px; font-size: 13px; }
+  .leaf-card { border-left: 4px solid var(--leaf); }
+  .leaf-card.correct { border-left-color: var(--good); }
+  .leaf-card.incorrect { border-left-color: var(--bad); }
+  .answer { font-size: 13px; line-height: 1.45; word-break: break-word; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; margin-right: 4px; }
+  .pill.yes { background: #16361f; color: var(--good); }
+  .pill.no { background: #3a1717; color: var(--bad); }
+  .pill.bad-node { background: #4a1515; color: #ff8a80; }
+  .pill.mostly-bad { background: #4a3510; color: var(--mostly-bad); }
+  .pill.good-node { background: #16361f; color: var(--good-node); }
+  .pill.ditched { background: #2a2d36; color: var(--muted); }
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+  .legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  #tooltip {
+    position: fixed; pointer-events: none; z-index: 100;
+    background: #1e2230; border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; font-size: 12px; max-width: 380px; display: none;
+    box-shadow: 0 8px 24px rgba(0,0,0,.45);
+  }
+  #tooltip .tok { font-family: ui-monospace, monospace; font-size: 13px; margin-bottom: 4px; }
+  .error { color: var(--bad); }
+  .toolbar { display: flex; gap: 12px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
+  .toolbar label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  input[type="checkbox"] { accent-color: var(--accent); }
+  .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px; }
+  .stat { background: #0f1117; border-radius: 6px; padding: 8px; text-align: center; }
+  .stat strong { display: block; font-size: 17px; }
+  .summary-wrap { padding: 20px; max-width: 1400px; margin: 0 auto; }
+  .summary-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 16px; }
+  .summary-table-wrap { overflow-x: auto; margin-bottom: 24px; max-width: 100%; }
+  table.summary { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+  table.summary th, table.summary td {
+    border: 1px solid var(--border); padding: 8px 10px; text-align: right; background: var(--bg);
+  }
+  table.summary th { background: var(--panel); color: var(--muted); font-weight: 600; cursor: pointer; user-select: none; }
+  table.summary th.frozen, table.summary td.frozen { position: sticky; z-index: 2; }
+  table.summary th.frozen { z-index: 4; background: var(--panel); }
+  table.summary td.frozen { background: var(--bg); }
+  table.summary th.frozen-last, table.summary td.frozen-last { box-shadow: 4px 0 8px rgba(0,0,0,.35); }
+  table.summary th.highlight, table.summary td.highlight { background: #151b28; color: #cfe0ff; }
+  table.summary tr:hover td { background: #151922; }
+  .freeze-toggles {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 6px 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
+    background: #12151c; max-height: 140px; overflow: auto; min-width: min(100%, 720px);
+  }
+  .freeze-toggles label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
+  .preset-btn { background: #222; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 11px; cursor: pointer; }
+  .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+  .chart-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+  .chart-card h3 { margin: 0 0 8px; font-size: 13px; }
+  .chart { width: 100%; height: 280px; }
+  @media (max-width: 1100px) { .chart-row { grid-template-columns: 1fr; } .layout { grid-template-columns: 1fr; height: auto; min-height: 70vh; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Bad &amp; Good Node Explorer (τ=0.001)</h1>
+  <p class="muted" id="source">Loading…</p>
+  <div class="tabs">
+    <button type="button" class="tab-btn active" data-tab="summary">Summary</button>
+    <button type="button" class="tab-btn" data-tab="trees">Tree Explorer</button>
+  </div>
+</header>
+
+<div id="summaryPanel" class="panel active">
+  <div class="summary-wrap">
+    <div class="stat-grid" id="globalStats"></div>
+    <div class="summary-controls">
+      <label>Model
+        <select id="modelFilter"><option value="">All models</option></select>
+      </label>
+      <label>Prefix length
+        <select id="prefixFilter"><option value="">All prefixes</option></select>
+      </label>
+      <label>Instruction
+        <select id="variantFilter">
+          <option value="">All variants</option>
+          <option value="legacy">legacy</option>
+          <option value="plain">plain</option>
+        </select>
+      </label>
+      <label>Aggregate by
+        <select id="aggSelect">
+          <option value="whole">Whole (filtered)</option>
+          <option value="by_model">Model</option>
+          <option value="by_prefix_length">Prefix length</option>
+          <option value="by_model_prefix">Model × prefix</option>
+          <option value="by_instruction_variant">Instruction variant</option>
+        </select>
+      </label>
+      <label>Bar chart column
+        <select id="metricSelect"></select>
+      </label>
+      <label>Scatter X
+        <select id="scatterX"></select>
+      </label>
+      <label>Scatter Y
+        <select id="scatterY"></select>
+      </label>
+      <div>
+        <div class="muted" style="margin-bottom:4px;display:flex;gap:8px;align-items:center">
+          Freeze columns
+          <button type="button" class="preset-btn" id="freezeDefaultBtn">Group only</button>
+          <button type="button" class="preset-btn" id="freezeClearBtn">Clear all</button>
+        </div>
+        <div id="freezeColumnToggles" class="freeze-toggles"></div>
+      </div>
+    </div>
+    <p class="muted" id="filterHint" style="margin:0 0 12px"></p>
+    <div class="chart-row">
+      <div class="chart-card">
+        <h3 id="barChartTitle">Metric by group</h3>
+        <svg class="chart" id="barChart"></svg>
+      </div>
+      <div class="chart-card">
+        <h3 id="scatterChartTitle">Scatter</h3>
+        <svg class="chart" id="scatterChart"></svg>
+      </div>
+    </div>
+    <div class="summary-table-wrap">
+      <table class="summary" id="summaryTable"><thead></thead><tbody></tbody></table>
+    </div>
+  </div>
+</div>
+
+<div id="treesPanel" class="panel">
+  <div style="padding:12px 20px;border-bottom:1px solid var(--border)">
+    <div class="controls">
+      <label>Run
+        <select id="runSelect"></select>
+      </label>
+      <label>Min edge prob
+        <select id="probFilter">
+          <option value="0">0 (show all)</option>
+          <option value="0.001">0.001</option>
+          <option value="0.01">0.01 (τ)</option>
+          <option value="0.05">0.05</option>
+        </select>
+      </label>
+      <div class="toolbar">
+        <label><input type="checkbox" id="showBad" checked /> Bad nodes (red)</label>
+        <label><input type="checkbox" id="showGood" checked /> Good nodes (green)</label>
+        <label><input type="checkbox" id="dimOther" /> Dim other nodes</label>
+        <button type="button" id="fitBtn">Fit to screen</button>
+        <button type="button" id="resetBtn">Reset zoom</button>
+      </div>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--bad-node)"></i> 100% bad</span>
+      <span><i style="background:var(--mostly-bad)"></i> &gt;75% bad</span>
+      <span><i style="background:var(--good-node)"></i> 100% good</span>
+      <span><i style="background:var(--internal)"></i> mixed</span>
+    </div>
+  </div>
+  <div class="layout">
+    <div class="graph-wrap">
+      <svg id="graph"></svg>
+      <div id="tooltip"></div>
+    </div>
+    <aside class="sidebar">
+      <div class="card">
+        <h3>Run summary</h3>
+        <div id="runMeta" class="muted">—</div>
+        <div class="stat-grid" id="statGrid"></div>
+      </div>
+      <h2 style="font-size:14px; margin:0 0 8px" id="detailTitle">Selected node</h2>
+      <div id="detailPanel"><p class="muted">Click a node in the graph.</p></div>
+    </aside>
+  </div>
+</div>
+
+<script>
+const MODEL_LABELS = {"deepseek-r1-7b":"DeepSeek-R1-7B","qwq-32b-awq":"QwQ-32B-AWQ"};
+
+const TABLE_COLUMNS = [
+  { key: "label", label: "Group", align: "left", chartable: false, freezeDefault: true },
+  { key: "trees", label: "Trees", chartable: true },
+  { key: "avg_max_depth", label: "Avg max depth", chartable: true },
+  { key: "avg_total_nodes", label: "Avg nodes", chartable: true },
+  { key: "avg_leaf_count", label: "Avg τ-leaves", chartable: true },
+  { key: "avg_mass_above_tau", label: "Avg mass above τ", chartable: true },
+  { key: "avg_max_breadth", label: "Avg max breadth", chartable: true },
+  { key: "avg_mean_breadth_by_depth", label: "Avg breadth/depth", chartable: true },
+  { key: "avg_breadth_warnings", label: "Avg breadth warnings", chartable: true },
+  { key: "avg_probe_leaves", label: "Avg probe leaves", chartable: true },
+  { key: "avg_candidates", label: "Avg candidates", chartable: true },
+  { key: "avg_exclusively_bad", label: "Avg excl. bad", chartable: true },
+  { key: "avg_exclusively_bad_pct", label: "Avg % bad cand.", chartable: true },
+  { key: "avg_exclusively_good", label: "Avg 100% good", chartable: true },
+  { key: "avg_ditched", label: "Avg ditched", chartable: true },
+  { key: "leaf_correct_pct", label: "Leaf good % (count)", chartable: true },
+  { key: "prob_good_pct", label: "P(good) %", chartable: true, highlight: true },
+  { key: "prob_bad_pct", label: "P(bad) %", chartable: true, highlight: true },
+  { key: "sum_exclusively_bad", label: "Total excl. bad", chartable: true },
+];
+
+let DATA = null;
+let currentRun = null;
+let currentNodes = [];
+let leafMap = new Map();
+let statusMap = new Map();
+let statsMap = new Map();
+let nodeById = new Map();
+let zoomBehavior = null;
+let svg = null;
+let gRoot = null;
+let selectedNodeId = null;
+let sortKey = "label";
+let sortAsc = true;
+let frozenColumnKeys = new Set(
+  TABLE_COLUMNS.filter(col => col.freezeDefault).map(col => col.key)
+);
+
+function loadFrozenColumns() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("badNodesFrozenCols") || "null");
+    if (Array.isArray(saved)) {
+      frozenColumnKeys = new Set(
+        saved.filter(key => TABLE_COLUMNS.some(col => col.key === key))
+      );
+    }
+  } catch {
+    frozenColumnKeys = new Set(
+      TABLE_COLUMNS.filter(col => col.freezeDefault).map(col => col.key)
+    );
+  }
+}
+
+function saveFrozenColumns() {
+  localStorage.setItem("badNodesFrozenCols", JSON.stringify([...frozenColumnKeys]));
+}
+
+function renderFreezeColumnToggles() {
+  const container = document.getElementById("freezeColumnToggles");
+  if (!container) return;
+  container.innerHTML = TABLE_COLUMNS.map(col => `
+    <label title="${col.label}">
+      <input type="checkbox" data-freeze-key="${col.key}" ${frozenColumnKeys.has(col.key) ? "checked" : ""} />
+      ${col.label}
+    </label>
+  `).join("");
+  container.querySelectorAll("input[data-freeze-key]").forEach(input => {
+    input.addEventListener("change", () => {
+      const key = input.dataset.freezeKey;
+      if (input.checked) frozenColumnKeys.add(key);
+      else frozenColumnKeys.delete(key);
+      saveFrozenColumns();
+      applyFrozenColumns();
+    });
+  });
+}
+
+function applyFrozenColumns() {
+  const table = document.getElementById("summaryTable");
+  if (!table) return;
+  const headerCells = [...table.querySelectorAll("thead th")];
+  if (!headerCells.length) return;
+  const offsets = new Map();
+  let left = 0;
+  headerCells.forEach((th, index) => {
+    const key = th.dataset.key;
+    if (frozenColumnKeys.has(key)) offsets.set(index, left);
+    left += th.offsetWidth;
+  });
+  const isFrozenRunEnd = index => {
+    if (!offsets.has(index)) return false;
+    const nextKey = headerCells[index + 1]?.dataset.key;
+    return !nextKey || !frozenColumnKeys.has(nextKey);
+  };
+  const syncCell = (cell, index) => {
+    const frozen = offsets.has(index);
+    cell.classList.toggle("frozen", frozen);
+    cell.classList.toggle("frozen-last", frozen && isFrozenRunEnd(index));
+    cell.style.left = frozen ? `${offsets.get(index)}px` : "";
+    cell.style.zIndex = frozen ? String(3 + index) : "";
+  };
+  headerCells.forEach((th, index) => syncCell(th, index));
+  table.querySelectorAll("tbody tr").forEach(row => {
+    [...row.children].forEach((td, index) => syncCell(td, index));
+  });
+}
+
+function fmtVal(v) {
+  if (v === null || v === undefined) return "—";
+  return v;
+}
+
+function switchTab(name) {
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.tab === name);
+  });
+  document.querySelectorAll(".panel").forEach(panel => {
+    panel.classList.toggle("active", panel.id === name + "Panel");
+  });
+  if (name === "trees" && currentRun) {
+    setTimeout(() => loadRun(currentRun.tree_key), 50);
+  }
+}
+
+function filteredSummaries() {
+  const model = document.getElementById("modelFilter")?.value || "";
+  const prefix = document.getElementById("prefixFilter")?.value || "";
+  const variant = document.getElementById("variantFilter")?.value || "";
+  return (DATA.tree_summaries || []).filter(row => {
+    if (model && row.model_id !== model) return false;
+    if (prefix && String(row.prefix_length) !== prefix) return false;
+    if (variant && row.instruction_variant !== variant) return false;
+    return true;
+  });
+}
+
+function emptyBucket() {
+  return {
+    trees: 0,
+    max_depth: 0,
+    total_nodes: 0,
+    leaf_count: 0,
+    mass_above_tau: 0,
+    max_breadth: 0,
+    mean_breadth_by_depth: 0,
+    breadth_warnings: 0,
+    probe_leaves: 0,
+    total_candidates: 0,
+    exclusively_bad: 0,
+    exclusively_bad_pct_sum: 0,
+    exclusively_good: 0,
+    ditched: 0,
+    leaf_correct: 0,
+    leaf_wrong: 0,
+    prob_mass_total: 0,
+    prob_good: 0,
+    prob_bad: 0,
+    _mass_n: 0,
+    _bad_pct_n: 0,
+    _breadth_depth_n: 0,
+  };
+}
+
+function addToBucket(bucket, row) {
+  bucket.trees += 1;
+  if (row.max_depth != null) bucket.max_depth += row.max_depth;
+  if (row.total_nodes != null) bucket.total_nodes += row.total_nodes;
+  if (row.leaf_count != null) bucket.leaf_count += row.leaf_count;
+  if (row.mass_above_tau != null) { bucket.mass_above_tau += row.mass_above_tau; bucket._mass_n += 1; }
+  if (row.max_breadth != null) bucket.max_breadth += row.max_breadth;
+  if (row.mean_breadth_by_depth != null) {
+    bucket.mean_breadth_by_depth += row.mean_breadth_by_depth;
+    bucket._breadth_depth_n += 1;
+  }
+  if (row.breadth_warning_count != null) bucket.breadth_warnings += row.breadth_warning_count;
+  if (row.total_leaves != null) bucket.probe_leaves += row.total_leaves;
+  if (row.total_candidates != null) bucket.total_candidates += row.total_candidates;
+  bucket.exclusively_bad += row.exclusively_bad_count || 0;
+  if (row.exclusively_bad_pct != null) {
+    bucket.exclusively_bad_pct_sum += row.exclusively_bad_pct;
+    bucket._bad_pct_n += 1;
+  }
+  bucket.exclusively_good += row.exclusively_good_count || 0;
+  bucket.ditched += row.ditched_count || 0;
+  bucket.leaf_correct += row.leaf_correct || 0;
+  bucket.leaf_wrong += row.leaf_wrong || 0;
+  bucket.prob_mass_total += row.prob_mass_total || 0;
+  bucket.prob_good += row.prob_good || 0;
+  bucket.prob_bad += row.prob_bad || 0;
+}
+
+function finalizeBucket(key, label, bucket) {
+  const trees = bucket.trees || 1;
+  const probeLeaves = bucket.probe_leaves || 0;
+  const round2 = v => (v == null ? null : Math.round(v * 100) / 100);
+  const round1 = v => (v == null ? null : Math.round(v * 10) / 10);
+  return {
+    key,
+    label,
+    trees: bucket.trees,
+    avg_max_depth: round2(bucket.max_depth / trees),
+    avg_total_nodes: round2(bucket.total_nodes / trees),
+    avg_leaf_count: round2(bucket.leaf_count / trees),
+    avg_mass_above_tau: bucket._mass_n ? round2(bucket.mass_above_tau / bucket._mass_n) : null,
+    avg_max_breadth: round2(bucket.max_breadth / trees),
+    avg_mean_breadth_by_depth: bucket._breadth_depth_n
+      ? round2(bucket.mean_breadth_by_depth / bucket._breadth_depth_n) : null,
+    avg_breadth_warnings: round2(bucket.breadth_warnings / trees),
+    avg_probe_leaves: round2(bucket.probe_leaves / trees),
+    avg_candidates: round2(bucket.total_candidates / trees),
+    avg_exclusively_bad: round2(bucket.exclusively_bad / trees),
+    avg_exclusively_bad_pct: bucket._bad_pct_n
+      ? round1(bucket.exclusively_bad_pct_sum / bucket._bad_pct_n) : null,
+    avg_exclusively_good: round2(bucket.exclusively_good / trees),
+    avg_ditched: round2(bucket.ditched / trees),
+    leaf_correct_pct: probeLeaves ? round1(100 * bucket.leaf_correct / probeLeaves) : null,
+    prob_good_pct: bucket.prob_mass_total
+      ? round1(100 * bucket.prob_good / bucket.prob_mass_total) : null,
+    prob_bad_pct: bucket.prob_mass_total
+      ? round1(100 * bucket.prob_bad / bucket.prob_mass_total) : null,
+    sum_exclusively_bad: bucket.exclusively_bad,
+  };
+}
+
+function groupMeta(row, dimension) {
+  if (dimension === "whole") return { key: "all", label: "All (filtered)" };
+  if (dimension === "by_model") {
+    return { key: row.model_id, label: MODEL_LABELS[row.model_id] || row.model_id };
+  }
+  if (dimension === "by_prefix_length") {
+    return { key: String(row.prefix_length), label: `prefix ${row.prefix_length}` };
+  }
+  if (dimension === "by_model_prefix") {
+    const label = `${MODEL_LABELS[row.model_id] || row.model_id} · pl ${row.prefix_length}`;
+    return { key: `${row.model_id}|${row.prefix_length}`, label };
+  }
+  return { key: row.instruction_variant, label: row.instruction_variant };
+}
+
+function aggregateSummaries(rows, dimension) {
+  if (!rows.length) return [];
+  if (dimension === "whole") {
+    const bucket = emptyBucket();
+    rows.forEach(row => addToBucket(bucket, row));
+    return [finalizeBucket("all", "All (filtered)", bucket)];
+  }
+  const buckets = new Map();
+  const labels = new Map();
+  for (const row of rows) {
+    const meta = groupMeta(row, dimension);
+    if (!buckets.has(meta.key)) buckets.set(meta.key, emptyBucket());
+    labels.set(meta.key, meta.label);
+    addToBucket(buckets.get(meta.key), row);
+  }
+  return [...buckets.entries()]
+    .map(([key, bucket]) => finalizeBucket(key, labels.get(key), bucket))
+    .sort((a, b) => {
+      if (dimension === "by_prefix_length") return Number(a.key) - Number(b.key);
+      if (dimension === "by_model_prefix") {
+        const [am, ap] = a.key.split("|");
+        const [bm, bp] = b.key.split("|");
+        return am.localeCompare(bm) || Number(ap) - Number(bp);
+      }
+      return a.label.localeCompare(b.label);
+    });
+}
+
+function currentAggRows() {
+  const dimension = document.getElementById("aggSelect").value;
+  return aggregateSummaries(filteredSummaries(), dimension);
+}
+
+function updateFilterHint() {
+  const rows = filteredSummaries();
+  const dimension = document.getElementById("aggSelect").value;
+  const aggRows = aggregateSummaries(rows, dimension);
+  const hints = [];
+  const model = document.getElementById("modelFilter").value;
+  if (model) hints.push(MODEL_LABELS[model] || model);
+  if (document.getElementById("prefixFilter").value) {
+    hints.push(`prefix ${document.getElementById("prefixFilter").value}`);
+  }
+  if (document.getElementById("variantFilter").value) {
+    hints.push(document.getElementById("variantFilter").value);
+  }
+  const filterText = hints.length ? `Filters: ${hints.join(", ")} · ` : "";
+  document.getElementById("filterHint").textContent =
+    `${filterText}${rows.length} trees · ${aggRows.length} groups`;
+}
+
+function renderGlobalStats() {
+  const filtered = filteredSummaries();
+  const whole = aggregateSummaries(filtered, "whole")[0] || {};
+  const totalBad = filtered.reduce((s, r) => s + (r.exclusively_bad_count || 0), 0);
+  document.getElementById("globalStats").innerHTML = `
+    <div class="stat"><strong>${filtered.length}</strong><span class="muted">trees</span></div>
+    <div class="stat"><strong>${totalBad}</strong><span class="muted">excl. bad nodes</span></div>
+    <div class="stat"><strong>${fmtVal(whole.prob_good_pct)}%</strong><span class="muted">P(good) mass</span></div>
+    <div class="stat"><strong>${fmtVal(whole.prob_bad_pct)}%</strong><span class="muted">P(bad) mass</span></div>
+  `;
+}
+
+function populateSummaryFilters() {
+  const modelSel = document.getElementById("modelFilter");
+  modelSel.innerHTML = '<option value="">All models</option>' +
+    (DATA.models || []).map(mid =>
+      `<option value="${mid}">${MODEL_LABELS[mid] || mid}</option>`
+    ).join("");
+
+  const prefixSel = document.getElementById("prefixFilter");
+  prefixSel.innerHTML = '<option value="">All prefixes</option>' +
+    (DATA.prefix_lengths || []).map(pl => `<option value="${pl}">${pl}</option>`).join("");
+
+  const chartable = TABLE_COLUMNS.filter(col => col.chartable);
+  const metricSel = document.getElementById("metricSelect");
+  metricSel.innerHTML = chartable.map(col => `<option value="${col.key}">${col.label}</option>`).join("");
+  metricSel.value = "avg_exclusively_bad_pct";
+
+  const scatterOpts = chartable.map(col => `<option value="${col.key}">${col.label}</option>`).join("");
+  document.getElementById("scatterX").innerHTML = scatterOpts;
+  document.getElementById("scatterY").innerHTML = scatterOpts;
+  document.getElementById("scatterX").value = "prob_good_pct";
+  document.getElementById("scatterY").value = "prob_bad_pct";
+
+  loadFrozenColumns();
+  renderFreezeColumnToggles();
+  document.getElementById("freezeDefaultBtn")?.addEventListener("click", () => {
+    frozenColumnKeys = new Set(["label"]);
+    saveFrozenColumns();
+    renderFreezeColumnToggles();
+    applyFrozenColumns();
+  });
+  document.getElementById("freezeClearBtn")?.addEventListener("click", () => {
+    frozenColumnKeys = new Set();
+    saveFrozenColumns();
+    renderFreezeColumnToggles();
+    applyFrozenColumns();
+  });
+}
+
+function sortRows(rows) {
+  return rows.sort((a, b) => {
+    const av = a[sortKey], bv = b[sortKey];
+    if (av === bv) return 0;
+    if (av === null || av === undefined) return 1;
+    if (bv === null || bv === undefined) return -1;
+    if (typeof av === "string") return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+    return sortAsc ? av - bv : bv - av;
+  });
+}
+
+function renderSummaryTable(rows) {
+  const sorted = sortRows([...rows]);
+  const thead = document.querySelector("#summaryTable thead");
+  const tbody = document.querySelector("#summaryTable tbody");
+  thead.innerHTML = "<tr>" + TABLE_COLUMNS.map(col => {
+    const arrow = sortKey === col.key ? (sortAsc ? " ▲" : " ▼") : "";
+    const cls = col.highlight ? ' class="highlight"' : "";
+    return `<th data-key="${col.key}"${cls} style="text-align:${col.align || "right"}">${col.label}${arrow}</th>`;
+  }).join("") + "</tr>";
+  tbody.innerHTML = sorted.map(row => "<tr>" + TABLE_COLUMNS.map(col =>
+    `<td data-key="${col.key}" class="${col.highlight ? "highlight" : ""}" style="text-align:${col.align || "right"}">${fmtVal(row[col.key])}</td>`
+  ).join("") + "</tr>").join("");
+  thead.querySelectorAll("th").forEach(th => {
+    th.addEventListener("click", () => {
+      const key = th.dataset.key;
+      if (sortKey === key) sortAsc = !sortAsc;
+      else { sortKey = key; sortAsc = key === "label"; }
+      renderSummary();
+    });
+  });
+  requestAnimationFrame(() => applyFrozenColumns());
+}
+
+function renderBarChart(rows, metricKey) {
+  const svgEl = d3.select("#barChart");
+  svgEl.selectAll("*").remove();
+  const width = svgEl.node().clientWidth || 600;
+  const height = 280;
+  const margin = { top: 12, right: 12, bottom: 80, left: 48 };
+  const innerW = width - margin.left - margin.right;
+  const innerH = height - margin.top - margin.bottom;
+  const g = svgEl.attr("viewBox", `0 0 ${width} ${height}`).append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+  const data = rows.filter(r => r[metricKey] !== null && r[metricKey] !== undefined);
+  if (!data.length) {
+    document.getElementById("barChartTitle").textContent = "No data for selected column";
+    return;
+  }
+  const x = d3.scaleBand().domain(data.map(d => d.label)).range([0, innerW]).padding(0.2);
+  const minVal = Math.min(0, d3.min(data, d => d[metricKey]) || 0);
+  const maxVal = d3.max(data, d => d[metricKey]) || 1;
+  const y = d3.scaleLinear().domain([minVal, maxVal]).nice().range([innerH, 0]);
+
+  g.append("g").attr("transform", `translate(0,${innerH})`)
+    .call(d3.axisBottom(x))
+    .selectAll("text")
+    .attr("transform", "rotate(-35)")
+    .style("text-anchor", "end")
+    .attr("fill", "#9aa0a6")
+    .attr("font-size", "10px");
+
+  g.append("g").call(d3.axisLeft(y).ticks(5)).attr("color", "#555");
+
+  g.selectAll(".bar")
+    .data(data)
+    .join("rect")
+    .attr("class", "bar")
+    .attr("x", d => x(d.label))
+    .attr("y", d => y(Math.max(d[metricKey], 0)))
+    .attr("width", x.bandwidth())
+    .attr("height", d => Math.abs(y(d[metricKey]) - y(0)))
+    .attr("fill", "var(--accent)")
+    .attr("rx", 3);
+
+  const metricLabel = document.getElementById("metricSelect").selectedOptions[0].textContent;
+  document.getElementById("barChartTitle").textContent = metricLabel + " by group";
+}
+
+function renderScatterChart(rows, xKey, yKey) {
+  const svgEl = d3.select("#scatterChart");
+  svgEl.selectAll("*").remove();
+  const width = svgEl.node().clientWidth || 600;
+  const height = 280;
+  const margin = { top: 12, right: 12, bottom: 48, left: 52 };
+  const innerW = width - margin.left - margin.right;
+  const innerH = height - margin.top - margin.bottom;
+  const g = svgEl.attr("viewBox", `0 0 ${width} ${height}`).append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+  const data = rows.filter(r =>
+    r[xKey] !== null && r[xKey] !== undefined &&
+    r[yKey] !== null && r[yKey] !== undefined
+  );
+  const xLabel = document.getElementById("scatterX").selectedOptions[0].textContent;
+  const yLabel = document.getElementById("scatterY").selectedOptions[0].textContent;
+  if (!data.length) {
+    document.getElementById("scatterChartTitle").textContent = "No data for selected columns";
+    return;
+  }
+
+  const x = d3.scaleLinear()
+    .domain(d3.extent(data, d => d[xKey])).nice()
+    .range([0, innerW]);
+  const y = d3.scaleLinear()
+    .domain(d3.extent(data, d => d[yKey])).nice()
+    .range([innerH, 0]);
+
+  g.append("g").attr("transform", `translate(0,${innerH})`)
+    .call(d3.axisBottom(x).ticks(6))
+    .attr("color", "#555");
+  g.append("g").call(d3.axisLeft(y).ticks(6)).attr("color", "#555");
+
+  g.append("text")
+    .attr("x", innerW / 2).attr("y", innerH + 38)
+    .attr("text-anchor", "middle").attr("fill", "#9aa0a6").attr("font-size", "11px")
+    .text(xLabel);
+  g.append("text")
+    .attr("transform", "rotate(-90)")
+    .attr("x", -innerH / 2).attr("y", -40)
+    .attr("text-anchor", "middle").attr("fill", "#9aa0a6").attr("font-size", "11px")
+    .text(yLabel);
+
+  const tooltip = document.getElementById("tooltip");
+  g.selectAll(".dot")
+    .data(data)
+    .join("circle")
+    .attr("class", "dot")
+    .attr("cx", d => x(d[xKey]))
+    .attr("cy", d => y(d[yKey]))
+    .attr("r", 6)
+    .attr("fill", "var(--accent)")
+    .attr("fill-opacity", 0.85)
+    .attr("stroke", "#fff")
+    .attr("stroke-width", 1)
+    .on("mouseenter", (event, d) => {
+      tooltip.innerHTML = `<div><strong>${escapeHtml(d.label)}</strong></div>
+        <div>${escapeHtml(xLabel)}: ${d[xKey]}</div>
+        <div>${escapeHtml(yLabel)}: ${d[yKey]}</div>`;
+      tooltip.style.display = "block";
+    })
+    .on("mousemove", event => {
+      tooltip.style.left = (event.clientX + 14) + "px";
+      tooltip.style.top = (event.clientY + 14) + "px";
+    })
+    .on("mouseleave", () => { tooltip.style.display = "none"; });
+
+  document.getElementById("scatterChartTitle").textContent = `${yLabel} vs ${xLabel}`;
+}
+
+function renderSummary() {
+  updateFilterHint();
+  const rows = currentAggRows();
+  const metricKey = document.getElementById("metricSelect").value;
+  const xKey = document.getElementById("scatterX").value;
+  const yKey = document.getElementById("scatterY").value;
+  renderSummaryTable(rows);
+  renderBarChart(rows, metricKey);
+  renderScatterChart(rows, xKey, yKey);
+  renderGlobalStats();
+}
+
+function displayToken(token) {
+  if (!token) return "⟨prompt⟩";
+  if (token === "\n") return "\\n";
+  if (token === "\t") return "\\t";
+  if (token === " ") return "·";
+  return token;
+}
+
+function fmtProb(p) {
+  if (p >= 0.0001) return p.toFixed(4);
+  return p.toExponential(2);
+}
+
+function escapeHtml(text) {
+  return String(text).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+function isInternal(nodeId) {
+  const node = nodeById.get(nodeId);
+  return !!(node && node.c && node.c.length);
+}
+
+function leafDescendants(nodes, nodeId) {
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  function walk(id) {
+    const node = byId[id];
+    if (!node.c || !node.c.length) return [id];
+    return node.c.flatMap(walk);
+  }
+  return walk(nodeId);
+}
+
+function treePositions(nodes, rootId = "root") {
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  function leafIds(nodeId) {
+    const node = byId[nodeId];
+    if (!node.c || !node.c.length) return [nodeId];
+    return node.c.flatMap(leafIds);
+  }
+  const leafOrder = leafIds(rootId);
+  const leafX = Object.fromEntries(leafOrder.map((id, i) => [id, i]));
+  const positions = {};
+  function assign(nodeId) {
+    const node = byId[nodeId];
+    let x;
+    if (!node.c || !node.c.length) x = leafX[nodeId];
+    else x = node.c.reduce((sum, cid) => sum + assign(cid), 0) / node.c.length;
+    positions[nodeId] = { x, y: -node.d };
+    return x;
+  }
+  assign(rootId);
+  return positions;
+}
+
+function buildEdges(nodes, minProb) {
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  const edges = [];
+  for (const node of nodes) {
+    for (const childId of node.c || []) {
+      const child = byId[childId];
+      if (!child || child.p < minProb) continue;
+      edges.push({ source: node.id, target: childId, prob: child.p, token: child.tok || "?" });
+    }
+  }
+  return edges;
+}
+
+function visibleNodeIds(edges) {
+  const ids = new Set(["root"]);
+  edges.forEach(e => { ids.add(e.source); ids.add(e.target); });
+  return ids;
+}
+
+function nodeCategory(nodeId) {
+  const stats = statsMap.get(nodeId);
+  const status = statusMap.get(nodeId);
+  const leaf = leafMap.get(nodeId);
+  if (stats?.color_class === "exclusively_bad" || status === "exclusively_bad") return "bad";
+  if (stats?.color_class === "mostly_bad") return "mostly_bad";
+  if (stats?.color_class === "exclusively_good") return "good";
+  if (leaf) return leaf.answer_correct ? "good_leaf" : "bad_leaf";
+  return "other";
+}
+
+function isHighlightedNode(nodeId) {
+  const cat = nodeCategory(nodeId);
+  const showBad = document.getElementById("showBad").checked;
+  const showGood = document.getElementById("showGood").checked;
+  if (cat === "bad" || cat === "mostly_bad" || cat === "bad_leaf") return showBad;
+  if (cat === "good" || cat === "good_leaf") return showGood;
+  return true;
+}
+
+function nodeFill(node) {
+  const stats = statsMap.get(node.id);
+  if (stats) {
+    if (stats.color_class === "exclusively_bad") return "var(--bad-node)";
+    if (stats.color_class === "exclusively_good") return "var(--good-node)";
+    if (stats.color_class === "mostly_bad") return "var(--mostly-bad)";
+    return "var(--internal)";
+  }
+  if (!node.c || !node.c.length) {
+    const leaf = leafMap.get(node.id);
+    if (leaf?.answer_correct) return "var(--good-node)";
+    return "var(--bad-node)";
+  }
+  if (node.id === "root") return "var(--accent)";
+  return "var(--internal)";
+}
+
+function nodeStroke(node) {
+  if (node.id === selectedNodeId) return "#fff";
+  const cat = nodeCategory(node.id);
+  if (cat === "bad") return "#ff8a80";
+  if (cat === "mostly_bad") return "#ffe082";
+  if (cat === "good" || cat === "good_leaf") return "#a5d6a7";
+  if (cat === "bad_leaf") return "#ef9a9a";
+  return "#222";
+}
+
+function nodeRadius(node) {
+  if (node.id === selectedNodeId) return 9;
+  const cat = nodeCategory(node.id);
+  if (cat === "bad") return 8;
+  if (cat === "mostly_bad") return 7;
+  if (cat === "good") return 7;
+  if (!node.c || !node.c.length) return 5;
+  return 4;
+}
+
+function colorClassLabel(colorClass) {
+  if (colorClass === "exclusively_bad") return "100% bad";
+  if (colorClass === "mostly_bad") return ">75% bad";
+  if (colorClass === "exclusively_good") return "100% good";
+  return "mixed";
+}
+
+function pillClassForStats(stats) {
+  if (!stats) return "";
+  if (stats.color_class === "exclusively_bad") return "bad-node";
+  if (stats.color_class === "mostly_bad") return "mostly-bad";
+  if (stats.color_class === "exclusively_good") return "good-node";
+  return "ditched";
+}
+
+function renderRunMeta(run) {
+  const row = (DATA.tree_summaries || []).find(r => r.tree_key === run.tree_key) || {};
+  document.getElementById("runMeta").innerHTML = [
+    `<div><strong>${MODEL_LABELS[run.model_id] || run.model_id}</strong> · ${run.instruction_variant}</div>`,
+    `<div>prefix ${run.prefix_length} · seed ${run.seed}</div>`,
+  ].join("");
+  document.getElementById("statGrid").innerHTML = `
+    <div class="stat"><strong style="color:var(--bad-node)">${row.exclusively_bad_count ?? 0}</strong><span class="muted">excl. bad</span></div>
+    <div class="stat"><strong style="color:var(--good-node)">${row.exclusively_good_count ?? 0}</strong><span class="muted">100% good</span></div>
+    <div class="stat"><strong>${row.leaf_correct_pct ?? "—"}%</strong><span class="muted">good leaves</span></div>
+  `;
+}
+
+function renderLeafCard(leaf) {
+  const correct = leaf.answer_correct;
+  return `
+    <div class="card leaf-card ${correct ? "correct" : "incorrect"}">
+      <div class="muted">${leaf.leaf_id} · p=${fmtProb(leaf.path_prob)}</div>
+      <div class="answer">${leaf.answer_text ? escapeHtml(leaf.answer_text) : "<em class='muted'>no answer</em>"}</div>
+      <div style="margin-top:8px">
+        <span class="pill ${correct ? "yes" : "no"}">${correct ? "good" : "bad"}</span>
+        ${leaf.reasoning_complete ? '<span class="pill yes">complete</span>' : '<span class="pill no">incomplete</span>'}
+      </div>
+    </div>
+  `;
+}
+
+function renderDetailPanel(nodeId) {
+  const panel = document.getElementById("detailPanel");
+  const title = document.getElementById("detailTitle");
+  if (!nodeId) {
+    title.textContent = "Selected node";
+    panel.innerHTML = '<p class="muted">Click a node in the graph or a table row.</p>';
+    return;
+  }
+  const status = statusMap.get(nodeId);
+  const stats = statsMap.get(nodeId);
+  const leaf = leafMap.get(nodeId);
+  const node = nodeById.get(nodeId);
+  const leaves = leafDescendants(currentNodes, nodeId)
+    .map(id => leafMap.get(id))
+    .filter(Boolean)
+    .sort((a, b) => b.path_prob - a.path_prob);
+
+  title.textContent = `Node ${nodeId}`;
+  panel.innerHTML = `
+    <div class="card">
+      <div class="mono muted">${node ? displayToken(node.tok) : ""} · depth ${node?.d ?? "?"} · p=${node ? fmtProb(node.p) : "?"}</div>
+      ${stats ? `<div style="margin-top:6px"><span class="pill ${pillClassForStats(stats)}">${stats.bad_pct_display}% bad · ${stats.n_good}/${stats.n_leaves} good</span></div>` : ""}
+      ${status ? `<div style="margin-top:6px"><span class="pill ${status === "exclusively_bad" ? "bad-node" : "ditched"}">${status}</span></div>` : ""}
+      ${leaf ? `<div style="margin-top:8px" class="answer">${escapeHtml(leaf.answer_text || "(no answer)")}</div>` : ""}
+      ${leaves.length ? `<div class="muted" style="margin-top:6px">${leaves.length} leaves · ${leaves.filter(l => l.answer_correct).length} good · ${leaves.filter(l => !l.answer_correct).length} bad</div>` : ""}
+    </div>
+    ${leaves.length ? leaves.map(renderLeafCard).join("") : ""}
+  `;
+}
+
+function selectNode(nodeId) {
+  selectedNodeId = nodeId;
+  renderDetailPanel(nodeId);
+  if (currentRun) {
+    const minProb = parseFloat(document.getElementById("probFilter").value);
+    drawGraph(currentNodes, minProb);
+  }
+  focusNode(nodeId);
+}
+
+function focusNode(nodeId) {
+  const node = gRoot.selectAll(".node").filter(d => d.id === nodeId);
+  if (node.empty()) return;
+  const [[x, y]] = node.data().map(d => [d.sx, d.sy]);
+  const width = svg.node().clientWidth;
+  const height = svg.node().clientHeight;
+  svg.transition().duration(500).call(
+    zoomBehavior.transform,
+    d3.zoomIdentity.translate(width / 2, height / 2).scale(1.4).translate(-x, -y)
+  );
+}
+
+function drawGraph(nodes, minProb) {
+  currentNodes = nodes;
+  nodeById = new Map(nodes.map(n => [n.id, n]));
+  const dimOther = document.getElementById("dimOther").checked;
+
+  const positions = treePositions(nodes);
+  const edges = buildEdges(nodes, minProb);
+  const visible = visibleNodeIds(edges);
+  const graphNodes = nodes
+    .filter(n => visible.has(n.id))
+    .map(n => ({ ...n, ...positions[n.id] }));
+
+  const xs = graphNodes.map(n => n.x);
+  const ys = graphNodes.map(n => n.y);
+  const padX = Math.max((Math.max(...xs) - Math.min(...xs)) * 0.08, 1);
+  const padY = Math.max((Math.max(...ys) - Math.min(...ys)) * 0.08, 1);
+  const xScale = d => (d - Math.min(...xs) + padX) * 28;
+  const yScale = d => (d - Math.min(...ys) + padY) * 60;
+  graphNodes.forEach(n => { n.sx = xScale(n.x); n.sy = yScale(n.y); });
+
+  const byId = Object.fromEntries(graphNodes.map(n => [n.id, n]));
+  const links = edges
+    .filter(e => byId[e.source] && byId[e.target])
+    .map(e => ({
+      ...e,
+      sx: byId[e.source].sx, sy: byId[e.source].sy,
+      tx: byId[e.target].sx, ty: byId[e.target].sy,
+    }));
+
+  const maxProb = Math.max(...links.map(l => l.prob), 1e-9);
+  gRoot.selectAll("*").remove();
+
+  function linkOpacity(targetId, sourceId) {
+    const targetCat = nodeCategory(targetId);
+    const polar = ["bad", "mostly_bad", "good", "good_leaf", "bad_leaf"].includes(targetCat);
+    if (!isHighlightedNode(targetId)) return 0.08;
+    if (dimOther && !polar) return 0.15;
+    return 0.85;
+  }
+
+  gRoot.selectAll(".link")
+    .data(links, d => `${d.source}-${d.target}`)
+    .join("line")
+    .attr("class", "link")
+    .attr("x1", d => d.sx).attr("y1", d => d.sy)
+    .attr("x2", d => d.tx).attr("y2", d => d.ty)
+    .attr("stroke", d => {
+      const cat = nodeCategory(d.target);
+      if (cat === "bad") return "var(--bad-node)";
+      if (cat === "mostly_bad") return "var(--mostly-bad)";
+      if (cat === "good" || cat === "good_leaf") return "var(--good-node)";
+      if (cat === "bad_leaf") return "var(--bad)";
+      return "#555";
+    })
+    .attr("stroke-width", d => 0.8 + 5 * (d.prob / maxProb))
+    .attr("stroke-opacity", d => linkOpacity(d.target, d.source))
+    .attr("stroke-linecap", "round");
+
+  const node = gRoot.selectAll(".node")
+    .data(graphNodes, d => d.id)
+    .join("g")
+    .attr("class", "node")
+    .attr("transform", d => `translate(${d.sx},${d.sy})`)
+    .attr("opacity", d => {
+      if (!isHighlightedNode(d.id)) return 0.08;
+      const cat = nodeCategory(d.id);
+      const polar = ["bad", "mostly_bad", "good", "good_leaf", "bad_leaf"].includes(cat);
+      if (dimOther && !polar) return 0.18;
+      return 1;
+    })
+    .style("cursor", "pointer")
+    .on("click", (_, d) => selectNode(d.id));
+
+  node.append("circle")
+    .attr("r", d => nodeRadius(d))
+    .attr("fill", d => nodeFill(d))
+    .attr("stroke", d => nodeStroke(d))
+    .attr("stroke-width", d => d.id === selectedNodeId ? 2.5 : (nodeCategory(d.id) === "bad" ? 2 : 1));
+
+  node.append("text")
+    .attr("dy", d => (d.c && d.c.length ? -12 : 14))
+    .attr("text-anchor", "middle")
+    .attr("fill", "#ccc")
+    .attr("font-size", "10px")
+    .attr("font-family", "ui-monospace, monospace")
+    .text(d => {
+      if (d.id === "root") return "prompt";
+      const tok = displayToken(d.tok);
+      return tok.length > 12 ? tok.slice(0, 10) + "…" : tok;
+    });
+
+  node.filter(d => statsMap.has(d.id) && (d.c && d.c.length))
+    .append("text")
+    .attr("dy", 16)
+    .attr("text-anchor", "middle")
+    .attr("fill", d => {
+      const stats = statsMap.get(d.id);
+      if (stats?.color_class === "exclusively_bad") return "#ff8a80";
+      if (stats?.color_class === "mostly_bad") return "#ffe082";
+      if (stats?.color_class === "exclusively_good") return "#a5d6a7";
+      return "#aaa";
+    })
+    .attr("font-size", "9px")
+    .text(d => {
+      const stats = statsMap.get(d.id);
+      return stats.color_class === "exclusively_good"
+        ? `${stats.n_good}✓`
+        : `${stats.bad_pct_display}%`;
+    });
+
+  const tooltip = document.getElementById("tooltip");
+  node.on("mouseenter", (event, d) => {
+    const status = statusMap.get(d.id);
+    const stats = statsMap.get(d.id);
+    const leaf = leafMap.get(d.id);
+    let html = `<div class="tok">${escapeHtml(displayToken(d.id === "root" ? null : d.tok))}</div>`;
+    html += `<div>id: ${d.id} · depth ${d.d}</div>`;
+    html += `<div>path prob: ${fmtProb(d.p)}</div>`;
+    if (stats) {
+      html += `<div><span class="pill ${pillClassForStats(stats)}">${stats.n_bad} bad · ${stats.n_good} good (${stats.bad_pct_display}% bad)</span></div>`;
+    }
+    if (status) html += `<div><span class="pill ${status === "exclusively_bad" ? "bad-node" : "ditched"}">${status}</span></div>`;
+    if (leaf) html += `<div style="margin-top:6px"><span class="pill ${leaf.answer_correct ? "yes" : "no"}">${leaf.answer_correct ? "good leaf" : "bad leaf"}</span> ${escapeHtml(leaf.answer_text || "(no answer)")}</div>`;
+    tooltip.innerHTML = html;
+    tooltip.style.display = "block";
+  }).on("mousemove", event => {
+    tooltip.style.left = (event.clientX + 14) + "px";
+    tooltip.style.top = (event.clientY + 14) + "px";
+  }).on("mouseleave", () => { tooltip.style.display = "none"; });
+
+  fitToScreen();
+}
+
+function fitToScreen() {
+  const bounds = gRoot.node().getBBox();
+  const width = svg.node().clientWidth;
+  const height = svg.node().clientHeight;
+  if (!bounds.width || !bounds.height) return;
+  const midX = bounds.x + bounds.width / 2;
+  const midY = bounds.y + bounds.height / 2;
+  const scale = 0.9 / Math.max(bounds.width / width, bounds.height / height);
+  svg.transition().duration(400).call(
+    zoomBehavior.transform,
+    d3.zoomIdentity.translate(width / 2, height / 2).scale(scale).translate(-midX, -midY)
+  );
+}
+
+function loadRun(treeKey) {
+  const run = DATA.runs.find(r => r.tree_key === treeKey);
+  const nodes = DATA.trees[treeKey];
+  if (!run || !nodes) return;
+
+  currentRun = run;
+  selectedNodeId = null;
+  statusMap = new Map(Object.entries(DATA.node_status[treeKey] || {}));
+  statsMap = new Map(Object.entries(DATA.node_stats[treeKey] || {}));
+  leafMap = new Map(Object.entries((DATA.leaf_completions[treeKey] || {})));
+  nodeById = new Map(nodes.map(n => [n.id, n]));
+
+  renderRunMeta(run);
+  renderDetailPanel(null);
+
+  const minProb = parseFloat(document.getElementById("probFilter").value);
+  drawGraph(nodes, minProb);
+}
+
+function init() {
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+  });
+
+  svg = d3.select("#graph");
+  gRoot = svg.append("g");
+  zoomBehavior = d3.zoom()
+    .scaleExtent([0.05, 8])
+    .on("zoom", event => gRoot.attr("transform", event.transform));
+  svg.call(zoomBehavior);
+
+  document.getElementById("fitBtn").addEventListener("click", fitToScreen);
+  document.getElementById("resetBtn").addEventListener("click", () => {
+    svg.transition().duration(300).call(zoomBehavior.transform, d3.zoomIdentity);
+  });
+
+  populateSummaryFilters();
+  ["modelFilter", "prefixFilter", "variantFilter", "aggSelect", "metricSelect", "scatterX", "scatterY"].forEach(id => {
+    document.getElementById(id).addEventListener("change", () => renderSummary());
+  });
+
+  const runSelect = document.getElementById("runSelect");
+  DATA.runs.forEach(run => {
+    const opt = document.createElement("option");
+    opt.value = run.tree_key;
+    const row = (DATA.tree_summaries || []).find(r => r.tree_key === run.tree_key) || {};
+    opt.textContent = `${MODEL_LABELS[run.model_id] || run.model_id} · ${run.instruction_variant} · pl ${run.prefix_length} · ${row.exclusively_bad_pct ?? "?"}% bad`;
+    runSelect.appendChild(opt);
+  });
+
+  runSelect.addEventListener("change", () => {
+    loadRun(runSelect.value);
+    switchTab("trees");
+  });
+  document.getElementById("probFilter").addEventListener("change", () => {
+    if (currentRun) loadRun(currentRun.tree_key);
+  });
+  ["showBad", "showGood", "dimOther"].forEach(id => {
+    document.getElementById(id).addEventListener("change", () => {
+      if (currentRun) {
+        const minProb = parseFloat(document.getElementById("probFilter").value);
+        drawGraph(currentNodes, minProb);
+      }
+    });
+  });
+
+  document.getElementById("source").textContent =
+    `Source: ${DATA.source} · ${DATA.runs.length} runs · Summary tab for aggregates · Tree Explorer for per-node view`;
+
+  renderSummary();
+  if (runSelect.value) loadRun(runSelect.value);
+}
+
+fetch("bad_nodes_canvas.json")
+  .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); })
+  .then(data => { DATA = data; init(); })
+  .catch(err => {
+    document.getElementById("source").innerHTML =
+      `<span class="error">Failed to load bad_nodes_canvas.json: ${err.message}. Serve output/ via HTTP.</span>`;
+  });
+</script>
+</body>
+</html>

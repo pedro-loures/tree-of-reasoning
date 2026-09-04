@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Prefix Length Results</title>
+<style>
+  :root { color-scheme: dark; --bg:#111; --panel:#1a1a1a; --text:#e8e8e8; --muted:#9aa0a6; --border:#333; --accent:#6ea8fe; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  main { max-width: 1200px; margin: 0 auto; padding: 24px; }
+  h1,h2,h3 { margin: 0 0 8px; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
+  label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  select, button { background: #222; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { border-bottom: 1px solid var(--border); padding: 8px; text-align: left; }
+  pre.tree { background: #0d0d0d; border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow: auto; max-height: 70vh; font: 11px/1.45 ui-monospace, monospace; white-space: pre; }
+  canvas.chart { width: 100%; height: 280px; background: #0d0d0d; border: 1px solid var(--border); border-radius: 8px; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; }
+  .yes { background:#16361f; color:#7dcea0; }
+  .no { background:#3a1717; color:#e57373; }
+  details { margin-top: 12px; }
+  summary { cursor: pointer; padding: 8px 0; }
+  .banner { background: #1a2332; border: 1px solid #2a3a52; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; }
+  .error { color: #e57373; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Prefix Length vs Chain-of-Thought</h1>
+  <p class="muted" id="source"></p>
+
+  <div class="banner muted" id="serveHint">
+    Open via a local web server (file:// blocks tree loading). From tree-testing:
+    <code>cd output && python3 -m http.server 8765</code>
+    then visit <code>http://localhost:8765/results_viewer.html</code>
+    (use Cursor Ports if you are on SSH remote).
+  </div>
+
+  <section class="card" style="margin-top:16px">
+    <h2>What is mass above τ?</h2>
+    <p class="muted">Sum of cumulative path probabilities at all leaf nodes after τ=0.01 pruning. Usually well below 1.0.</p>
+  </section>
+
+  <section class="grid" style="margin-top:16px" id="stats"></section>
+
+  <section class="card" style="margin-top:16px">
+    <h2>Metric vs prefix length</h2>
+    <div class="controls">
+      <label>Metric <select id="metric"></select></label>
+      <label>Model <select id="model"></select></label>
+      <label>Chart <select id="chartType"><option value="line">Line</option><option value="bar">Bar</option></select></label>
+    </div>
+    <canvas class="chart" id="chart" width="1100" height="280"></canvas>
+    <p class="muted" id="chartAxes" style="margin-top:8px"></p>
+  </section>
+
+  <section class="card" style="margin-top:16px">
+    <h2>τ-pruned token tree</h2>
+    <div class="controls">
+      <label>Run <select id="treeRun"></select></label>
+    </div>
+    <p class="muted" id="treeMeta"></p>
+    <pre class="tree" id="tree">Loading…</pre>
+  </section>
+
+  <section style="margin-top:16px">
+    <h2>Tables by prefix length</h2>
+    <div id="tables"></div>
+  </section>
+
+  <section class="card" style="margin-top:16px">
+    <h2>Aggregated means</h2>
+    <div style="overflow:auto"><table id="agg"></table></div>
+  </section>
+</main>
+<script>
+const MODEL_LABELS = {"deepseek-r1-7b":"DeepSeek-R1-7B","qwq-32b-awq":"QwQ-32B-AWQ"};
+let DATA = null;
+
+function treePath(run) {
+  return `trees/${run.model_id}_${run.prefix_length}_${run.seed}.txt`;
+}
+
+function fmt(key, v) {
+  if (v == null) return '—';
+  if (key.endsWith('_correct') || key === 'mentions_lorem') return Math.round(v*100)+'%';
+  if (key === 'mass_above_tau') return v.toFixed(3);
+  return Number.isInteger(v) ? String(v) : v.toFixed(2);
+}
+function pill(v){ return `<span class="pill ${v? 'yes':'no'}">${v?'yes':'no'}</span>`; }
+
+function render() {
+  document.getElementById('source').textContent = `Source: ${DATA.source} · generated ${DATA.generated_at} · ${DATA.runs.length} runs`;
+
+  document.getElementById('stats').innerHTML = [
+    ['Runs', DATA.runs.length, '60 total'],
+    ['Prefix lengths', DATA.prefix_lengths.length, DATA.prefix_lengths.join(', ')],
+    ['Breadth warnings', DATA.runs.reduce((s,r)=>s+(r.breadth_warning_count||0),0), 'nodes with breadth >= 20'],
+  ].map(([l,v,d])=>`<div class="card"><div style="font-size:24px;font-weight:600">${v}</div><div>${l}</div><div class="muted">${d}</div></div>`).join('');
+
+  const metricSel = document.getElementById('metric');
+  metricSel.innerHTML = '';
+  DATA.metrics.forEach(m => { const o=document.createElement('option'); o.value=m.key; o.textContent=m.label; metricSel.appendChild(o); });
+  const modelSel = document.getElementById('model');
+  modelSel.innerHTML = '';
+  [['both','Both models'], ...DATA.models.map(m=>[m, MODEL_LABELS[m]||m])].forEach(([v,l])=>{ const o=document.createElement('option'); o.value=v; o.textContent=l; modelSel.appendChild(o); });
+
+  function aggregate(modelId, prefix, key) {
+    const row = DATA.aggregates.find(a => a.model_id===modelId && a.prefix_length===prefix);
+    return row ? row[key] : null;
+  }
+
+  function drawChart() {
+    const key = metricSel.value;
+    const metric = DATA.metrics.find(m=>m.key===key);
+    const unit = metric.unit;
+    const isRate = unit === 'rate';
+    const selected = modelSel.value;
+    const models = selected==='both' ? DATA.models : [selected];
+    const canvas = document.getElementById('chart');
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    const W=canvas.width, H=canvas.height;
+    const padL=64, padR=20, padT=36, padB=52;
+    const plotW = W - padL - padR;
+    const plotH = H - padT - padB;
+    const cats = DATA.prefix_lengths;
+    const series = models.map((mid,si)=>({
+      name: MODEL_LABELS[mid]||mid,
+      color: ['#6ea8fe','#f4a261'][si%2],
+      values: cats.map(p => { const v=aggregate(mid,p,key); return v==null?0:(isRate?v*100:v); })
+    }));
+    const all = series.flatMap(s=>s.values);
+    const maxV = Math.max(...all, isRate?100:1);
+    const type = document.getElementById('chartType').value;
+
+    function formatYTick(value) {
+      if (isRate) return Math.round(value) + '%';
+      if (unit === 'probability') return value.toFixed(2);
+      if (value >= 100 || Number.isInteger(value)) return String(Math.round(value));
+      if (value >= 10) return value.toFixed(0);
+      return value.toFixed(2);
+    }
+
+    const yUnit = isRate ? '%' : ({count:'count', tokens:'tokens', probability:'prob.', nats:'nats', 'log prob':'log prob'}[unit] || unit);
+    document.getElementById('chartAxes').textContent =
+      `Y-axis: ${metric.label} (${yUnit}, mean across 5 seeds) · X-axis: prefix length (words)`;
+
+    ctx.strokeStyle='#444'; ctx.fillStyle='#888'; ctx.font='12px sans-serif';
+    ctx.textAlign='right'; ctx.textBaseline='middle';
+    for (let i=0;i<=4;i++){
+      const frac = i/4;
+      const y = padT + plotH*frac;
+      const value = maxV*(1-frac);
+      ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke();
+      ctx.fillText(formatYTick(value), padL-8, y);
+    }
+    ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+    ctx.beginPath(); ctx.moveTo(padL, padT); ctx.lineTo(padL, H-padB); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(padL, H-padB); ctx.lineTo(W-padR, H-padB); ctx.stroke();
+
+    ctx.textAlign='center';
+    cats.forEach((c,i)=>{
+      const x = padL + i*(plotW/(cats.length-1||1));
+      ctx.fillText(String(c), x, H-padB+20);
+    });
+    ctx.textAlign='left';
+
+    series.forEach((s,si)=>{
+      ctx.strokeStyle=s.color; ctx.fillStyle=s.color; ctx.lineWidth=2;
+      const pts = s.values.map((v,i)=>[
+        padL + i*(plotW/(cats.length-1||1)),
+        padT + plotH - (v/maxV)*plotH
+      ]);
+      if (type==='line') {
+        ctx.beginPath(); pts.forEach(([x,y],i)=> i?ctx.lineTo(x,y):ctx.moveTo(x,y)); ctx.stroke();
+        pts.forEach(([x,y])=>{ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fill();});
+      } else {
+        const bw = plotW/cats.length*0.7/series.length;
+        pts.forEach(([x,y],i)=>{ const bx=x-bw*series.length/2+si*bw; ctx.fillRect(bx, y, bw, H-padB-y); });
+      }
+      ctx.fillText(s.name, W-padR-140, padT+14+si*16);
+    });
+  }
+  ['metric','model','chartType'].forEach(id => document.getElementById(id).addEventListener('change', drawChart));
+  drawChart();
+
+  const treeRun = document.getElementById('treeRun');
+  treeRun.innerHTML = '';
+  DATA.runs.forEach(r => {
+    const o=document.createElement('option');
+    o.value=r.tree_key;
+    o.textContent=`${MODEL_LABELS[r.model_id]||r.model_id} · prefix ${r.prefix_length} · seed ${r.seed}`;
+    treeRun.appendChild(o);
+  });
+
+  async function showTree(){
+    const key = treeRun.value;
+    const run = DATA.runs.find(r=>r.tree_key===key);
+    const pre = document.getElementById('tree');
+    pre.textContent = 'Loading tree…';
+    try {
+      const res = await fetch(treePath(run));
+      if (!res.ok) throw new Error(res.statusText);
+      const text = await res.text();
+      const lines = text.trim().split('\n');
+      document.getElementById('treeMeta').textContent = `${lines.length} lines · mass above τ = ${fmt('mass_above_tau', run?.mass_above_tau)}`;
+      pre.textContent = text;
+    } catch (e) {
+      document.getElementById('treeMeta').textContent = '';
+      pre.innerHTML = `<span class="error">Could not load ${treePath(run)}. Serve this folder over HTTP (see banner above).</span>`;
+    }
+  }
+  treeRun.addEventListener('change', showTree);
+  showTree();
+
+  const tables = document.getElementById('tables');
+  tables.innerHTML = '';
+  DATA.prefix_lengths.forEach(prefix => {
+    const det = document.createElement('details');
+    det.open = prefix===0;
+    det.innerHTML = `<summary>Prefix length: ${prefix} words</summary>`;
+    DATA.models.forEach(mid => {
+      const rows = DATA.runs.filter(r=>r.model_id===mid && r.prefix_length===prefix);
+      const card = document.createElement('div'); card.className='card'; card.style.margin='12px 0';
+      card.innerHTML = `<h3>${MODEL_LABELS[mid]||mid}</h3><table><thead><tr><th>Seed</th><th>Nodes</th><th>Depth</th><th>Leaves</th><th>Mass τ</th><th>Greedy</th><th>Top-1</th><th>Top-k</th></tr></thead><tbody>${
+        rows.map(r=>`<tr><td>${r.seed}</td><td>${r.total_nodes}</td><td>${r.max_depth}</td><td>${r.leaf_count}</td><td>${fmt('mass_above_tau',r.mass_above_tau)}</td><td>${pill(r.answer_correct)}</td><td>${pill(r.top_1_correct)}</td><td>${pill(r.top_k_any_correct)}</td></tr>`).join('')
+      }</tbody></table>`;
+      det.appendChild(card);
+    });
+    tables.appendChild(det);
+  });
+
+  document.getElementById('agg').innerHTML = '<thead><tr><th>Model</th><th>Prefix</th><th>Nodes</th><th>Depth</th><th>Mass τ</th><th>Greedy</th><th>Top-1</th><th>Top-k</th></tr></thead><tbody>' +
+    DATA.aggregates.map(r=>`<tr><td>${MODEL_LABELS[r.model_id]||r.model_id}</td><td>${r.prefix_length}</td><td>${fmt('total_nodes',r.total_nodes)}</td><td>${fmt('max_depth',r.max_depth)}</td><td>${fmt('mass_above_tau',r.mass_above_tau)}</td><td>${fmt('answer_correct',r.answer_correct)}</td><td>${fmt('top_1_correct',r.top_1_correct)}</td><td>${fmt('top_k_any_correct',r.top_k_any_correct)}</td></tr>`).join('') + '</tbody>';
+}
+
+fetch('canvas_metrics.json')
+  .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); })
+  .then(data => { DATA = data; render(); })
+  .catch(err => {
+    document.getElementById('stats').innerHTML = `<div class="card error">Failed to load canvas_metrics.json: ${err.message}. Serve output/ via HTTP server.</div>`;
+  });
+</script>
+</body>
+</html>

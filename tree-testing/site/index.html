@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tree of Reasoning — Dashboards</title>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body>
+<header>
+  <h1>Tree of Reasoning</h1>
+  <p class="muted">Unified dashboard for capitals, elections, and interactive τ-tree experiments.</p>
+  <div class="top-tabs">
+    <button type="button" class="top-tab-btn" data-experiment="capitals">Capitals</button>
+    <button type="button" class="top-tab-btn" data-experiment="elections">Elections</button>
+    <button type="button" class="top-tab-btn active" data-experiment="interactive">Interactive</button>
+  </div>
+</header>
+
+<!-- Capitals -->
+<section id="capitalsPanel" class="experiment-panel">
+  <p class="muted" id="capitalsSource" style="padding:0 20px">Loading…</p>
+  <div class="tabs" style="padding:0 20px">
+    <button type="button" class="tab-btn active" data-tab="summary">Summary</button>
+    <button type="button" class="tab-btn" data-tab="trees">Tree Explorer</button>
+  </div>
+  <div id="capitalsPanel_summaryPanel" class="panel active">
+    <div class="summary-wrap">
+      <div class="summary-controls">
+        <label>Region <select id="capitalsRegionFilter"><option value="">All</option></select></label>
+        <label>Country <select id="capitalsCountryFilter"><option value="">All</option></select></label>
+      </div>
+      <p class="muted filter-hint"></p>
+      <div class="stat-grid"></div>
+      <div class="summary-table-wrap"><table class="summary"><thead></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+  <div id="capitalsPanel_treesPanel" class="panel">
+    <div class="controls">
+      <label>Tree <select id="capitalsRunSelect"></select></label>
+      <label>Min edge prob <select id="capitalsProbFilter">
+        <option value="0">0</option><option value="0.01" selected>0.01 (τ)</option>
+      </select></label>
+      <label><input type="checkbox" id="capitalsShowBad" checked /> Bad nodes</label>
+      <label><input type="checkbox" id="capitalsShowGood" checked /> Good nodes</label>
+      <button type="button" id="capitalsFitBtn">Fit</button>
+      <button type="button" id="capitalsResetBtn">Reset zoom</button>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--bad-node)"></i> 100% bad</span>
+      <span><i style="background:var(--good-node)"></i> 100% good</span>
+      <span><i style="background:var(--internal)"></i> mixed</span>
+    </div>
+    <div class="layout">
+      <div class="graph-wrap"><svg id="capitalsGraph"></svg><div id="capitalsTooltip"></div></div>
+      <aside class="sidebar">
+        <div class="card"><h3>Run</h3><div id="capitalsRunMeta" class="muted">—</div></div>
+        <h3 style="font-size:14px;margin:0 0 8px">Selected node</h3>
+        <div id="capitalsDetail"><p class="muted">Click a node.</p></div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- Elections -->
+<section id="electionsPanel" class="experiment-panel">
+  <p class="muted" id="electionsSource" style="padding:0 20px">Loading…</p>
+  <div class="tabs" style="padding:0 20px">
+    <button type="button" class="tab-btn active" data-tab="summary">Summary</button>
+    <button type="button" class="tab-btn" data-tab="trees">Tree Explorer</button>
+  </div>
+  <div id="electionsPanel_summaryPanel" class="panel active">
+    <div class="summary-wrap">
+      <p class="muted filter-hint"></p>
+      <div class="stat-grid"></div>
+      <div class="summary-table-wrap"><table class="summary"><thead></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+  <div id="electionsPanel_treesPanel" class="panel">
+    <div class="controls">
+      <label>Tree <select id="electionsRunSelect"></select></label>
+      <label>Min edge prob <select id="electionsProbFilter">
+        <option value="0">0</option><option value="0.01" selected>0.01 (τ)</option>
+      </select></label>
+      <button type="button" id="electionsFitBtn">Fit</button>
+      <button type="button" id="electionsResetBtn">Reset zoom</button>
+    </div>
+    <div class="layout">
+      <div class="graph-wrap"><svg id="electionsGraph"></svg><div id="electionsTooltip"></div></div>
+      <aside class="sidebar">
+        <div class="card"><h3>Run</h3><div id="electionsRunMeta" class="muted">—</div></div>
+        <div class="card"><h3>Candidate mention probs</h3><div id="electionsCandidates" class="muted">—</div></div>
+        <h3 style="font-size:14px;margin:0 0 8px">Selected node</h3>
+        <div id="electionsDetail"><p class="muted">Click a node.</p></div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- Interactive -->
+<section id="interactivePanel" class="experiment-panel active">
+  <div style="padding:0 20px">
+    <p class="muted" id="interactiveSource">Loading…</p>
+    <div class="view-only-banner" style="display:none">
+      <strong>View only.</strong> Tree generation, saving, and rescoring require running
+      <code>serve_dashboard.py</code> locally with a GPU.
+      <ol class="tutorial-steps">
+        <li>Enter a prompt and optional expected answers</li>
+        <li>Pick model and τ threshold</li>
+        <li>Click Generate tree, then explore good/bad nodes in Tree Explorer</li>
+      </ol>
+    </div>
+    <div class="generate-panel">
+      <div>
+        <label>Prompt <textarea id="interactivePrompt" placeholder="What is the capital of Brazil?"></textarea></label>
+        <div class="generate-row">
+          <label>Expected answers <input id="interactiveExpected" type="text" placeholder="Brasília, Brasilia" /></label>
+          <label>Model <select id="interactiveModel"></select></label>
+          <label>τ <select id="interactiveTau">
+            <option value="0.001">0.001</option><option value="0.01" selected>0.01</option><option value="0.05">0.05</option>
+          </select></label>
+        </div>
+        <p class="muted" id="interactiveStatus"></p>
+      </div>
+      <div>
+        <button type="button" class="top-tab-btn" id="interactiveGenerateBtn" style="margin-bottom:8px">Generate tree</button>
+        <button type="button" id="interactiveSaveBtn">Save tree</button>
+      </div>
+    </div>
+  </div>
+  <div class="tabs" style="padding:0 20px">
+    <button type="button" class="tab-btn active" data-tab="summary">Summary</button>
+    <button type="button" class="tab-btn" data-tab="trees">Tree Explorer</button>
+  </div>
+  <div id="interactivePanel_summaryPanel" class="panel active">
+    <div class="summary-wrap">
+      <p class="muted filter-hint"></p>
+      <div class="stat-grid"></div>
+      <div class="summary-table-wrap"><table class="summary"><thead></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+  <div id="interactivePanel_treesPanel" class="panel">
+    <div class="controls">
+      <label>Tree <select id="interactiveRunSelect"></select></label>
+      <label>Min edge prob <select id="interactiveProbFilter">
+        <option value="0">0</option><option value="0.01" selected>0.01 (τ)</option>
+      </select></label>
+      <label><input type="checkbox" id="interactiveShowBad" checked /> Bad nodes</label>
+      <label><input type="checkbox" id="interactiveShowGood" checked /> Good nodes</label>
+      <button type="button" id="interactiveFitBtn">Fit</button>
+      <button type="button" id="interactiveResetBtn">Reset zoom</button>
+    </div>
+    <div class="layout">
+      <div class="graph-wrap"><svg id="interactiveGraph"></svg><div id="interactiveTooltip"></div></div>
+      <aside class="sidebar">
+        <div class="card"><h3>Run</h3><div id="interactiveRunMeta" class="muted">—</div></div>
+        <h3 style="font-size:14px;margin:0 0 8px">Selected node</h3>
+        <div id="interactiveDetail"><p class="muted">Click a node.</p></div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<script src="assets/site.js"></script>
+<script src="assets/tree-graph.js"></script>
+<script src="assets/summary-panel.js"></script>
+<script src="assets/adapters/capitals.js"></script>
+<script src="assets/adapters/elections.js"></script>
+<script src="assets/adapters/interactive.js"></script>
+</body>
+</html>

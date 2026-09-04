@@ -1,0 +1,15 @@
+results_sources:
+  - id: main
+    label: Seeded Lorem (original)
+    path: ../tree-of-reasoning/results
+  - id: mech_interp
+    label: Same Lorem (mech-interp)
+    path: ../tree-of-reasoning/results/mech_interp
+output_dir: output
+top_k_words: 10
+word_edges_output: word_edges.json
+export_canvas: true
+build_viewer: true
+build_plots: true
+plot_dpi: 120
+plot_grid_dpi: 100

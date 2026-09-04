@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>τ-Tree Viewer</title>
+<style>
+  :root { color-scheme: dark; --bg:#0f1117; --panel:#1a1d27; --text:#e8eaed; --muted:#9aa0a6; --border:#2d3142; --accent:#6ea8fe; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 system-ui,sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:16px 20px; background:var(--panel); border-bottom:1px solid var(--border); }
+  h1 { margin:0 0 8px; font-size:20px; }
+  main { display:grid; grid-template-columns:1fr 360px; height:calc(100vh - 130px); }
+  .graph { overflow:auto; border-right:1px solid var(--border); background:#0a0c10; }
+  aside { overflow:auto; padding:12px; background:var(--panel); }
+  .controls { display:flex; flex-wrap:wrap; gap:12px; align-items:end; margin-top:12px; }
+  label { display:grid; gap:4px; font-size:12px; color:var(--muted); }
+  select,button { background:#222; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:8px 10px; }
+  .card { background:#12151c; border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px; }
+  .muted { color:var(--muted); font-size:12px; }
+  .pill { font-size:11px; padding:2px 8px; border-radius:999px; display:inline-block; }
+  .ok { background:#16361f; color:#7dcea0; }
+  .bad { background:#3a1717; color:#e57373; }
+  .error { color:#e57373; padding:16px; }
+  svg { display:block; }
+  .path-step { font:12px/1.6 ui-monospace,monospace; padding:2px 0; border-bottom:1px solid var(--border); }
+  .path-step:last-child { border-bottom:none; font-weight:600; color:var(--accent); }
+  .path-prob { color:var(--muted); margin-left:6px; }
+  #pathPanel { margin-bottom:16px; }
+  .legend { display:flex; flex-wrap:wrap; gap:10px; margin-top:8px; font-size:11px; color:var(--muted); }
+  .legend span { display:inline-flex; align-items:center; gap:5px; }
+  .legend i { width:8px; height:8px; border-radius:50%; display:inline-block; }
+</style>
+</head>
+<body>
+<header>
+  <h1>τ-Pruned Reasoning Tree</h1>
+  <p class="muted">Colored nodes · edge width ∝ probability · hover a node to see the full path from root</p>
+  <div class="controls">
+    <label>Dataset <select id="datasetSelect"></select></label>
+    <label>Model <select id="modelSelect"></select></label>
+    <label>Instruction
+      <select id="variantSelect">
+        <option value="legacy">legacy</option>
+        <option value="plain">plain</option>
+      </select>
+    </label>
+    <label>Prefix length <select id="prefixSelect"></select></label>
+    <label>Seed <select id="seedSelect"></select></label>
+    <button type="button" id="fitBtn">Scroll to top</button>
+  </div>
+  <div class="legend">
+    <span><i style="background:#6ea8fe"></i> root</span>
+    <span><i style="background:#3d4459"></i> internal</span>
+    <span><i style="background:#888"></i> leaf</span>
+    <span><i style="background:#f4a261"></i> top-k leaf</span>
+  </div>
+  <div id="meta" class="muted" style="margin-top:8px"></div>
+  <div id="loadStatus" class="muted"></div>
+</header>
+<main>
+  <div class="graph" id="graphWrap"><svg id="svg"></svg></div>
+  <aside>
+    <div id="pathPanel" class="card" style="display:none">
+      <h2 style="font-size:14px;margin:0 0 8px">Path to node</h2>
+      <div id="pathContent"></div>
+    </div>
+    <div id="sidebar"></div>
+  </aside>
+</main>
+<script>
+const COLORS = ['#f4a261','#e9c46a','#2a9d8f','#457b9d','#9b5de5'];
+const MODEL_LABELS = { 'deepseek-r1-7b': 'DeepSeek-R1-7B', 'qwq-32b-awq': 'QwQ-32B-AWQ' };
+const X_SCALE = 10, Y_SCALE = 28;
+
+let DATA = null, trees = null;
+let graphState = null;
+
+function tok(t) {
+  if (!t) return '⟨prompt⟩';
+  if (t === '\n') return '\\n';
+  if (t === '\t') return '\\t';
+  if (t === ' ') return '·';
+  return t;
+}
+function fmt(p) { return p >= 0.0001 ? p.toFixed(4) : p.toExponential(2); }
+function escapeHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function treeKey(dataset, model, variant, prefix, seed) {
+  return `${dataset}:${model}:${variant}:${prefix}:${seed}`;
+}
+
+function datasetLabel(datasetId) {
+  const match = (DATA?.datasets || []).find(d => d.id === datasetId);
+  return match?.label || datasetId;
+}
+
+function runsForDataset(datasetId) {
+  return DATA.runs.filter(r => r.dataset_id === datasetId);
+}
+
+function variantFromKey(treeKey) {
+  return treeKey.split(':')[2];
+}
+
+function runsForSelection(datasetId, variant) {
+  return runsForDataset(datasetId).filter(r => variantFromKey(r.tree_key) === variant);
+}
+
+function buildParentMap(nodes) {
+  const parent = { root: null };
+  nodes.forEach(n => (n.c || []).forEach(cid => { parent[cid] = n.id; }));
+  return parent;
+}
+
+function pathToRoot(nodeId, parent) {
+  const ids = [];
+  let cur = nodeId;
+  while (cur) { ids.push(cur); cur = parent[cur]; }
+  return ids.reverse();
+}
+
+function layout(nodes) {
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  function leaves(id) {
+    const n = byId[id];
+    return !n.c?.length ? [id] : n.c.flatMap(leaves);
+  }
+  const order = leaves('root');
+  const leafX = Object.fromEntries(order.map((id, i) => [id, i]));
+  const pos = {};
+  function assign(id) {
+    const n = byId[id];
+    let x;
+    if (!n.c?.length) x = leafX[id];
+    else x = n.c.reduce((s, c) => s + assign(c), 0) / n.c.length;
+    pos[id] = { x, y: -n.d };
+    return x;
+  }
+  assign('root');
+  return pos;
+}
+
+function nodeColor(node, topk) {
+  const rank = topk.get(node.id);
+  if (rank) return rank.color;
+  if (node.id === 'root') return '#6ea8fe';
+  if (node.c?.length) return '#3d4459';
+  return '#888';
+}
+
+function nodeRadius(node, topk) {
+  if (topk.has(node.id)) return 5;
+  if (node.id === 'root') return 5;
+  if (node.c?.length) return 3;
+  return 4;
+}
+
+function clearHighlight() {
+  if (!graphState) return;
+  graphState.edgeEls.forEach(el => { el.setAttribute('stroke-opacity', '0.55'); el.setAttribute('stroke-width', el.dataset.baseWidth); });
+  graphState.nodeEls.forEach(el => {
+    el.setAttribute('opacity', '1');
+    el.setAttribute('r', el.dataset.baseR);
+    el.setAttribute('stroke-width', el.dataset.baseStroke);
+  });
+  document.getElementById('pathPanel').style.display = 'none';
+}
+
+function highlightPath(nodeId) {
+  if (!graphState) return;
+  const pathIds = new Set(pathToRoot(nodeId, graphState.parent));
+  const pathEdgeKeys = new Set();
+  const pathArr = [...pathIds];
+  for (let i = 1; i < pathArr.length; i++) {
+    pathEdgeKeys.add(`${pathArr[i - 1]}->${pathArr[i]}`);
+  }
+
+  graphState.edgeEls.forEach(el => {
+    const onPath = pathEdgeKeys.has(el.dataset.key);
+    el.setAttribute('stroke-opacity', onPath ? '1' : '0.08');
+    el.setAttribute('stroke-width', onPath ? String(Number(el.dataset.baseWidth) * 1.4) : el.dataset.baseWidth);
+  });
+  graphState.nodeEls.forEach(el => {
+    const onPath = pathIds.has(el.dataset.id);
+    el.setAttribute('opacity', onPath ? '1' : '0.12');
+    if (onPath) {
+      el.setAttribute('r', el.dataset.id === nodeId ? String(Number(el.dataset.baseR) * 1.6) : el.dataset.baseR);
+      el.setAttribute('stroke-width', el.dataset.id === nodeId ? '2' : el.dataset.baseStroke);
+    }
+  });
+
+  const byId = graphState.byId;
+  const steps = pathArr.map(id => {
+    const n = byId[id];
+    const label = tok(id === 'root' ? null : n.tok);
+    return `<div class="path-step">${escapeHtml(label)}<span class="path-prob">p=${fmt(n.p)}</span></div>`;
+  }).join('');
+  document.getElementById('pathContent').innerHTML = steps;
+  document.getElementById('pathPanel').style.display = 'block';
+}
+
+function renderRun(run, nodes) {
+  try {
+  const svg = document.getElementById('svg');
+  svg.innerHTML = '';
+  clearHighlight();
+
+  const topk = new Map(run.top_k_completions.map((t, i) => [t.leaf_id, { ...t, color: COLORS[i] }]));
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  const parent = buildParentMap(nodes);
+  const pos = layout(nodes);
+
+  const edges = [];
+  nodes.forEach(n => (n.c || []).forEach(cid => {
+    const c = byId[cid];
+    if (c) edges.push({ from: n.id, to: cid, prob: c.p, key: `${n.id}->${cid}` });
+  }));
+
+  const xs = Object.values(pos).map(p => p.x);
+  const ys = Object.values(pos).map(p => p.y);
+  const minX = Math.min(...xs), minY = Math.min(...ys);
+  const sx = v => (v - minX + 1) * X_SCALE;
+  const sy = v => (v - minY + 1) * Y_SCALE;
+  const maxP = Math.max(...edges.map(e => e.prob), 1e-9);
+
+  const coords = {};
+  Object.entries(pos).forEach(([id, p]) => { coords[id] = { cx: sx(p.x), cy: sy(p.y) }; });
+
+  let w = 0, h = 0;
+  Object.values(coords).forEach(c => {
+    w = Math.max(w, c.cx + 20);
+    h = Math.max(h, c.cy + 20);
+  });
+  svg.setAttribute('width', w);
+  svg.setAttribute('height', h);
+
+  const edgeEls = [];
+  const nodeEls = [];
+
+  const gEdges = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  edges.forEach(e => {
+    const a = coords[e.from], b = coords[e.to];
+    if (!a || !b) return;
+    const col = topk.get(e.to)?.color || '#555';
+    const sw = 0.6 + 3 * (e.prob / maxP);
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', a.cx); line.setAttribute('y1', a.cy);
+    line.setAttribute('x2', b.cx); line.setAttribute('y2', b.cy);
+    line.setAttribute('stroke', col);
+    line.setAttribute('stroke-width', sw);
+    line.setAttribute('stroke-opacity', '0.55');
+    line.setAttribute('stroke-linecap', 'round');
+    line.dataset.key = e.key;
+    line.dataset.baseWidth = sw;
+    gEdges.appendChild(line);
+    edgeEls.push(line);
+  });
+  svg.appendChild(gEdges);
+
+  const gNodes = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  nodes.forEach(n => {
+    const c = coords[n.id];
+    if (!c) return;
+    const fill = nodeColor(n, topk);
+    const r = nodeRadius(n, topk);
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('cx', c.cx);
+    circle.setAttribute('cy', c.cy);
+    circle.setAttribute('r', r);
+    circle.setAttribute('fill', fill);
+    circle.setAttribute('stroke', topk.has(n.id) ? '#fff' : '#222');
+    circle.setAttribute('stroke-width', topk.has(n.id) ? '1.5' : '0.5');
+    circle.dataset.id = n.id;
+    circle.dataset.baseR = r;
+    circle.dataset.baseStroke = topk.has(n.id) ? '1.5' : '0.5';
+    circle.style.cursor = 'pointer';
+
+    circle.addEventListener('mouseenter', () => highlightPath(n.id));
+    circle.addEventListener('mouseleave', clearHighlight);
+
+    gNodes.appendChild(circle);
+    nodeEls.push(circle);
+  });
+  svg.appendChild(gNodes);
+
+  graphState = { edgeEls, nodeEls, parent, byId };
+
+  document.getElementById('meta').textContent =
+    `${datasetLabel(run.dataset_id)} · ${MODEL_LABELS[run.model_id] || run.model_id} · ${run.tree_key.split(':')[2]} · prefix ${run.prefix_length} · seed ${run.seed} · ${run.total_nodes} nodes · mass τ=${fmt(run.mass_above_tau)}`;
+  document.getElementById('sidebar').innerHTML =
+    '<h2 style="font-size:14px;margin:0 0 8px">Top-k leaf answers</h2>' +
+    run.top_k_completions.map((t, i) => `
+      <div class="card" style="border-left:4px solid ${COLORS[i]}">
+        <div class="muted">Top-${t.rank} · ${t.leaf_id} · p=${fmt(t.path_prob)}</div>
+        <div style="margin:8px 0;line-height:1.45">${t.answer_text ? escapeHtml(t.answer_text) : '<em>no answer</em>'}</div>
+        <span class="pill ${t.answer_correct ? 'ok' : 'bad'}">${t.answer_correct ? 'correct' : 'incorrect'}</span>
+      </div>`).join('');
+  document.getElementById('graphWrap').scrollTop = 0;
+  } catch (err) {
+    document.getElementById('meta').textContent = 'Render error: ' + err.message;
+    document.getElementById('svg').innerHTML = '';
+    document.getElementById('sidebar').innerHTML = '';
+    console.error(err);
+  }
+}
+
+function currentSelection() {
+  return {
+    dataset: document.getElementById('datasetSelect').value,
+    model: document.getElementById('modelSelect').value,
+    variant: document.getElementById('variantSelect').value,
+    prefix: Number(document.getElementById('prefixSelect').value),
+    seed: Number(document.getElementById('seedSelect').value),
+  };
+}
+
+function showCurrent() {
+  const { dataset, model, variant, prefix, seed } = currentSelection();
+  const run = DATA.runs.find(r => r.tree_key === treeKey(dataset, model, variant, prefix, seed));
+  if (!run) {
+    document.getElementById('meta').textContent = 'No run for this combination.';
+    document.getElementById('sidebar').innerHTML = '';
+    document.getElementById('svg').innerHTML = '';
+    return;
+  }
+  const nodes = trees[run.tree_key];
+  if (!nodes) {
+    document.getElementById('meta').textContent = 'Tree data missing for ' + run.tree_key;
+    return;
+  }
+  renderRun(run, nodes);
+}
+
+function populateDependentFilters() {
+  const dataset = document.getElementById('datasetSelect').value;
+  const datasetRuns = runsForDataset(dataset);
+  const variants = [...new Set(datasetRuns.map(r => variantFromKey(r.tree_key)))].sort();
+  const variantSelect = document.getElementById('variantSelect');
+  const prevVariant = variantSelect.value;
+  variantSelect.innerHTML = variants.map(v => `<option value="${v}">${v}</option>`).join('');
+  if (variants.includes(prevVariant)) variantSelect.value = prevVariant;
+
+  const variant = variantSelect.value;
+  const subset = runsForSelection(dataset, variant);
+  const models = [...new Set(subset.map(r => r.model_id))].sort();
+  const prefixes = [...new Set(subset.map(r => r.prefix_length))].sort((a, b) => a - b);
+  const seeds = [...new Set(subset.map(r => r.seed))].sort((a, b) => a - b);
+
+  const modelSelect = document.getElementById('modelSelect');
+  const prefixSelect = document.getElementById('prefixSelect');
+  const seedSelect = document.getElementById('seedSelect');
+  const prevModel = modelSelect.value;
+  const prevPrefix = prefixSelect.value;
+  const prevSeed = seedSelect.value;
+
+  modelSelect.innerHTML = models.map(m => `<option value="${m}">${MODEL_LABELS[m] || m}</option>`).join('');
+  prefixSelect.innerHTML = prefixes.map(p => `<option value="${p}">${p}</option>`).join('');
+  seedSelect.innerHTML = seeds.map(s => `<option value="${s}">${s}</option>`).join('');
+
+  if (models.includes(prevModel)) modelSelect.value = prevModel;
+  if (prefixes.includes(Number(prevPrefix))) prefixSelect.value = prevPrefix;
+  if (seeds.includes(Number(prevSeed))) seedSelect.value = prevSeed;
+}
+
+function populateFilters() {
+  const datasets = DATA.datasets || [{ id: 'main', label: 'main' }];
+  document.getElementById('datasetSelect').innerHTML = datasets.map(d => `<option value="${d.id}">${d.label}</option>`).join('');
+  populateDependentFilters();
+  ['datasetSelect', 'modelSelect', 'variantSelect', 'prefixSelect', 'seedSelect'].forEach(id => {
+    document.getElementById(id).addEventListener('change', () => {
+      if (id === 'datasetSelect' || id === 'variantSelect') populateDependentFilters();
+      showCurrent();
+    });
+  });
+  document.getElementById('fitBtn').onclick = () => document.getElementById('graphWrap').scrollTo({ top: 0, left: 0 });
+}
+
+async function init() {
+  const status = document.getElementById('loadStatus');
+  status.textContent = 'Loading tree data (about 4.6 MB)…';
+  try {
+    const res = await fetch(`../output/canvas_trees.json?v=${Date.now()}`);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    status.textContent = 'Parsing tree data…';
+    const text = await res.text();
+    DATA = JSON.parse(text);
+    trees = DATA.trees;
+    status.textContent = `${DATA.runs.length} runs loaded (${(DATA.datasets || []).length} datasets)`;
+    populateFilters();
+    showCurrent();
+  } catch (err) {
+    status.innerHTML = `<span class="error">Failed to load data: ${escapeHtml(err.message)}</span>`;
+    console.error(err);
+  }
+}
+
+init();
+</script>
+</body>
+</html>

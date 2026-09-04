@@ -1,0 +1,34 @@
+models:
+  - id: deepseek-r1-7b
+    hf_id: deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
+    reasoning_parser: deepseek_r1
+    max_model_len: 8192
+    gpu_memory_utilization: 0.90
+  - id: qwq-32b-awq
+    hf_id: Qwen/QwQ-32B-AWQ
+    reasoning_parser: deepseek_r1
+    max_model_len: 4096
+    gpu_memory_utilization: 0.92
+
+prompt: >-
+  Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+
+vllm:
+  max_model_len: 8192
+  gpu_memory_utilization: 0.90
+  trust_remote_code: true
+  enforce_eager: false
+
+probe:
+  logprobs_limit: 20  # vLLM 0.8.x caps logprobs at 20
+  min_prob: 0.01
+  min_count: 2
+  branch_mode: tau          # tau | top_k
+  path_prob_threshold: 0.01 # prune branches below 1% cumulative path prob
+  branch_factor: 2          # used only when branch_mode=top_k
+  tree_depth: null          # null = expand until tau pruning stops all paths
+  max_tree_depth: 128       # safety cap on depth
+  temperature: 0.0
+  reasoning_probe_max_tokens: 8
+
+results_dir: results

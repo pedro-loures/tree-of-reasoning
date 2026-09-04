@@ -1,0 +1,14 @@
+# Pinned for RTX 3090 Ti driver (CUDA 12.4 / driver 555.x)
+torch==2.6.0
+torchvision==0.21.0
+torchaudio==2.6.0
+vllm==0.8.5
+pytest>=8.0.0
+pyyaml>=6.0
+transformers>=4.48,<4.52
+tokenizers>=0.21,<0.22
+accelerate>=0.34.0
+autoawq>=0.2.7
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+tqdm>=4.66.0

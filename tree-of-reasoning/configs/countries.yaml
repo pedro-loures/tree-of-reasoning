@@ -1,0 +1,102 @@
+countries:
+  # South America
+  - id: brazil
+    name: Brazil
+    capitals: [brasilia, "brasília"]
+  - id: argentina
+    name: Argentina
+    capitals: ["buenos aires"]
+  - id: venezuela
+    name: Venezuela
+    capitals: [caracas]
+  - id: bolivia
+    name: Bolivia
+    capitals: ["la paz", sucre]
+  - id: colombia
+    name: Colombia
+    capitals: [bogota, "bogotá"]
+
+  # Central and North America
+  - id: united_states
+    name: "United States of America"
+    capitals: [washington, "washington d.c.", "washington dc", "washington, d.c."]
+  - id: mexico
+    name: Mexico
+    capitals: ["mexico city", "ciudad de méxico", "ciudad de mexico"]
+  - id: canada
+    name: Canada
+    capitals: [ottawa]
+  - id: cuba
+    name: Cuba
+    capitals: [havana, "la habana"]
+  - id: jamaica
+    name: Jamaica
+    capitals: [kingston]
+
+  # Africa
+  - id: mozambique
+    name: Mozambique
+    capitals: [maputo]
+  - id: madagascar
+    name: Madagascar
+    capitals: [antananarivo]
+  - id: egypt
+    name: Egypt
+    capitals: [cairo]
+  - id: morocco
+    name: Morocco
+    capitals: [rabat]
+  - id: south_africa
+    name: South Africa
+    capitals: [pretoria, "cape town", bloemfontein]
+
+  # Europe
+  - id: england
+    name: England
+    capitals: [london]
+  - id: italy
+    name: Italy
+    capitals: [rome, roma]
+  - id: albania
+    name: Albania
+    capitals: [tirana]
+  - id: portugal
+    name: Portugal
+    capitals: [lisbon, lisboa]
+  - id: russia
+    name: Russia
+    capitals: [moscow, moskva]
+
+  # Asia
+  - id: china
+    name: China
+    capitals: [beijing, peking]
+  - id: japan
+    name: Japan
+    capitals: [tokyo]
+  - id: india
+    name: India
+    capitals: ["new delhi"]
+  - id: mongolia
+    name: Mongolia
+    capitals: [ulaanbaatar, ulan bator]
+  - id: jordan
+    name: Jordan
+    capitals: [amman]
+
+  # Oceania + islands
+  - id: australia
+    name: Australia
+    capitals: [canberra]
+  - id: new_zealand
+    name: New Zealand
+    capitals: [wellington]
+  - id: east_timor
+    name: East Timor
+    capitals: [dili]
+  - id: papua_new_guinea
+    name: Papua New Guinea
+    capitals: ["port moresby"]
+  - id: fiji
+    name: Fiji
+    capitals: [suva]

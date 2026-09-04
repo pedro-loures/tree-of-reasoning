@@ -1,0 +1,2316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Brazilian President Experiment Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0f1117;
+    --panel: #1a1d27;
+    --text: #e8eaed;
+    --muted: #9aa0a6;
+    --border: #2d3142;
+    --accent: #6ea8fe;
+    --bad: #e57373;
+    --bad-node: #c62828;
+    --mostly-bad: #f4a261;
+    --good: #7dcea0;
+    --good-node: #2e7d32;
+    --ditched: #5c6370;
+    --expanded: #ff9800;
+    --expanded-ditched: #9575cd;
+    --leaf: #888;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 16px 20px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  h1 { margin: 0 0 4px; font-size: 20px; }
+  .tabs { display: flex; gap: 8px; margin-top: 12px; }
+  .tab-btn {
+    background: #222; color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 14px; cursor: pointer;
+  }
+  .tab-btn.active { border-color: var(--accent); background: #1e2a3d; color: var(--accent); }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .layout { display: grid; grid-template-columns: 1fr 360px; height: calc(100vh - 160px); }
+  .graph-wrap { position: relative; overflow: hidden; border-right: 1px solid var(--border); }
+  #graph { width: 100%; height: 100%; cursor: grab; }
+  #graph:active { cursor: grabbing; }
+  .sidebar { overflow-y: auto; padding: 16px; background: var(--panel); }
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+  label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  select, button { background: #222; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
+  button:hover { border-color: var(--accent); }
+  .muted { color: var(--muted); font-size: 12px; }
+  .card { background: #12151c; border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+  .card h3 { margin: 0 0 8px; font-size: 13px; }
+  .leaf-card { border-left: 4px solid var(--leaf); }
+  .leaf-card.correct { border-left-color: var(--good); }
+  .leaf-card.incorrect { border-left-color: var(--bad); }
+  .leaf-card.neutral { border-left-color: var(--internal); }
+  .node-card { border-left: 4px solid var(--bad-node); cursor: pointer; }
+  .node-card.mostly-bad { border-left-color: var(--mostly-bad); }
+  .node-card.exclusively-good { border-left-color: var(--good-node); }
+  .node-card:hover { border-color: var(--accent); }
+  .answer { font-size: 13px; line-height: 1.45; word-break: break-word; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; margin-right: 4px; }
+  .pill.yes { background: #16361f; color: var(--good); }
+  .pill.no { background: #3a1717; color: var(--bad); }
+  .pill.bad-node { background: #4a1515; color: #ff8a80; }
+  .pill.mostly-bad { background: #4a3510; color: var(--mostly-bad); }
+  .pill.good-node { background: #16361f; color: var(--good-node); }
+  .pill.ditched { background: #2a2d36; color: var(--muted); }
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+  .legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  #tooltip {
+    position: fixed; pointer-events: none; z-index: 100;
+    background: #1e2230; border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; font-size: 12px; max-width: 340px; display: none;
+    box-shadow: 0 8px 24px rgba(0,0,0,.45);
+  }
+  #tooltip .tok { font-family: ui-monospace, monospace; font-size: 13px; margin-bottom: 4px; }
+  .error { color: var(--bad); }
+  .toolbar { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+  .toolbar label { display: inline-flex; align-items: center; gap: 6px; }
+  input[type="checkbox"] { accent-color: var(--accent); }
+  .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px; }
+  .stat { background: #0f1117; border-radius: 6px; padding: 8px; text-align: center; }
+  .stat strong { display: block; font-size: 18px; }
+  .summary-wrap { padding: 20px; max-width: 1400px; margin: 0 auto; }
+  .summary-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 16px; }
+  .summary-table-wrap { overflow-x: auto; margin-bottom: 24px; max-width: 100%; }
+  table.summary { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+  table.summary th, table.summary td {
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+    text-align: right;
+    background: var(--bg);
+  }
+  table.summary th { background: var(--panel); color: var(--muted); font-weight: 600; cursor: pointer; user-select: none; }
+  table.summary th.frozen, table.summary td.frozen {
+    position: sticky;
+    z-index: 2;
+  }
+  table.summary th.frozen { z-index: 4; background: var(--panel); }
+  table.summary td.frozen { background: var(--bg); }
+  table.summary th.frozen-last, table.summary td.frozen-last {
+    box-shadow: 4px 0 8px rgba(0, 0, 0, 0.35);
+  }
+  table.summary th.highlight.frozen, table.summary td.highlight.frozen { background: #151b28; }
+  table.summary tr:hover td { background: #151922; }
+  table.summary tr:hover td.frozen { background: #151922; }
+  table.summary tr:hover td.highlight.frozen { background: #1a2233; }
+  .freeze-toggles {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 6px 10px;
+    align-items: center;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #12151c;
+    max-height: 140px;
+    overflow: auto;
+    min-width: min(100%, 720px);
+  }
+  .freeze-toggles label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  table.summary th:hover { color: var(--accent); }
+  table.summary th.highlight, table.summary td.highlight {
+    background: #151b28;
+    color: #cfe0ff;
+  }
+  .chart-row { margin-bottom: 20px; }
+  .chart-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+  .chart-card h3 { margin: 0 0 8px; font-size: 13px; }
+  .chart { width: 100%; height: 280px; }
+  .progress-bar { height: 6px; background: #222; border-radius: 3px; margin-top: 8px; overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--accent); transition: width 0.3s; }
+  .bad-filter {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    padding: 8px 0; font-size: 12px;
+  }
+  .bad-filter label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+  .preset-btn {
+    background: #222; color: var(--muted); border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px 8px; font-size: 11px; cursor: pointer;
+  }
+  .preset-btn:hover { border-color: var(--accent); color: var(--text); }
+  @media (max-width: 900px) {
+    .chart-row { grid-template-columns: 1fr; }
+    .layout { grid-template-columns: 1fr; height: auto; min-height: 70vh; }
+    .stat-grid { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Brazilian President Experiment</h1>
+  <p class="muted" id="source">Loading…</p>
+  <div class="progress-bar" title="Bad-nodes analysis progress">
+    <div class="progress-fill" id="progressFill" style="width:0%"></div>
+  </div>
+  <div class="tabs">
+    <button type="button" class="tab-btn active" data-tab="summary">Summary</button>
+    <button type="button" class="tab-btn" data-tab="trees">Tree Explorer</button>
+  </div>
+</header>
+
+<div id="summaryPanel" class="panel active">
+  <div class="summary-wrap">
+    <div class="stat-grid" id="globalStats"></div>
+    <div class="summary-controls">
+      <label>Prefix length
+        <select id="prefixFilter"><option value="">All prefixes</option></select>
+      </label>
+      <label>Instruction
+        <select id="variantFilter">
+          <option value="">All prompts</option>
+        </select>
+      </label>
+      <label>Region
+        <select id="summaryRegionFilter" style="display:none"><option value="">All regions</option></select>
+      </label>
+      <label>Model
+        <select id="summaryCountryFilter"><option value="">All models</option></select>
+      </label>
+      <label>Count as correct
+        <select id="correctnessMode"></select>
+      </label>
+      <label>Aggregate by
+        <select id="aggSelect">
+          <option value="whole">Whole (filtered)</option>
+          <option value="by_region">Region</option>
+          <option value="by_country" selected>Model</option>
+          <option value="by_prefix_length">Prefix length</option>
+          <option value="by_instruction_variant">Instruction variant</option>
+        </select>
+      </label>
+      <label>Chart column
+        <select id="metricSelect"></select>
+      </label>
+      <label>Mention metric
+        <select id="candidateMetricSelect">
+          <option value="mention_prob">P(mention) mass</option>
+          <option value="mention_share_pct">Share of tree mass %</option>
+          <option value="leaf_count"># leaves mentioning</option>
+          <option value="good_mass">P(good ∩ mention)</option>
+        </select>
+      </label>
+      <div>
+        <div class="muted" style="margin-bottom:4px;display:flex;gap:8px;align-items:center">
+          Freeze columns
+          <button type="button" class="preset-btn" id="freezeDefaultBtn">Group only</button>
+          <button type="button" class="preset-btn" id="freezeClearBtn">Clear all</button>
+        </div>
+        <div id="freezeColumnToggles" class="freeze-toggles"></div>
+      </div>
+    </div>
+    <p class="muted" id="filterHint" style="margin:0 0 12px"></p>
+    <div class="summary-table-wrap">
+      <table class="summary" id="summaryTable">
+        <thead></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="chart-row">
+      <div class="chart-card">
+        <h3 id="barChartTitle">Metric by group</h3>
+        <svg class="chart" id="barChart"></svg>
+      </div>
+    </div>
+    <div class="chart-row">
+      <div class="chart-card">
+        <h3 id="candidateChartTitle">Candidate metric by model</h3>
+        <svg class="chart" id="candidateChart"></svg>
+        <p class="muted" id="candidateChartHint" style="margin:8px 0 0"></p>
+      </div>
+    </div>
+    <div class="chart-row">
+      <div class="chart-card">
+        <h3 id="politicianChartTitle">Politician metric by model</h3>
+        <svg class="chart" id="politicianChart"></svg>
+        <p class="muted" id="politicianChartHint" style="margin:8px 0 0"></p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="treesPanel" class="panel">
+  <header style="border-top: 1px solid var(--border); padding-top: 12px;">
+    <div class="controls">
+      <label>Region
+        <select id="regionFilter" style="display:none"><option value="">All regions</option></select>
+      </label>
+      <label>Model
+        <select id="countryFilter"><option value="">All models</option></select>
+      </label>
+      <label>Run
+        <select id="runSelect"></select>
+      </label>
+      <label>Count as correct
+        <select id="treeCorrectnessMode"></select>
+      </label>
+      <label>Min edge prob
+        <select id="probFilter">
+          <option value="0">0 (show all)</option>
+          <option value="0.001">0.001</option>
+          <option value="0.01" selected>0.01 (τ)</option>
+          <option value="0.05">0.05</option>
+        </select>
+      </label>
+      <div class="bad-filter">
+        <span class="muted">Count as bad:</span>
+        <label><input type="checkbox" id="badFilter_mentioned_candidates" checked /> Mentioned candidates</label>
+        <label><input type="checkbox" id="badFilter_mentioned_politicians" checked /> Mentioned politicians</label>
+        <label><input type="checkbox" id="badFilter_no_politicians_mentioned" checked /> No politicians mentioned</label>
+        <label><input type="checkbox" id="badFilter_incomplete" checked /> Incomplete</label>
+        <label><input type="checkbox" id="badFilter_empty" checked /> No answer</label>
+        <button type="button" class="preset-btn" id="badPresetAll">All bad types</button>
+        <button type="button" class="preset-btn" id="badPresetCandidatesOnly">Candidates only</button>
+      </div>
+      <div class="toolbar">
+        <label><input type="checkbox" id="highlightBadOnly" /> Dim outside exclusively-bad subtrees</label>
+        <label><input type="checkbox" id="showExpandedOnly" /> Show expanded subtrees only</label>
+        <button type="button" id="fitBtn">Fit to screen</button>
+        <button type="button" id="resetBtn">Reset zoom</button>
+      </div>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--bad-node)"></i> 100% bad (red)</span>
+      <span><i style="background:var(--mostly-bad)"></i> &gt;75% bad (yellow)</span>
+      <span><i style="background:var(--good-node)"></i> 100% correct (matches criterion)</span>
+      <span><i style="background:var(--ditched)"></i> ditched candidate</span>
+      <span><i style="background:var(--expanded); box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--expanded)"></i> expanded excl. bad (orange ring)</span>
+      <span><i style="background:var(--expanded-ditched)"></i> ditched after expand</span>
+      <span class="muted" id="badModeLegend">bad = does not match correctness criterion</span>
+    </div>
+  </header>
+  <div class="layout">
+    <div class="graph-wrap">
+      <svg id="graph"></svg>
+      <div id="tooltip"></div>
+    </div>
+    <aside class="sidebar">
+      <div class="card">
+        <h3>Run summary</h3>
+        <div id="runMeta" class="muted">—</div>
+        <div class="stat-grid" id="statGrid"></div>
+      </div>
+      <div class="card">
+        <h3>Candidate mention mass</h3>
+        <svg class="chart" id="runCandidateChart" style="height:220px"></svg>
+        <p class="muted" id="runCandidateHint" style="margin-top:6px">—</p>
+      </div>
+      <div class="card">
+        <h3>Nodes by error rate</h3>
+        <div id="badNodeList" class="muted">—</div>
+      </div>
+      <h2 style="font-size:14px; margin:0 0 8px" id="detailTitle">Leaf completions</h2>
+      <div id="detailPanel"></div>
+    </aside>
+  </div>
+</div>
+
+<script>
+const MODEL_LABELS = {"deepseek-r1-7b":"DeepSeek-R1-7B","qwq-32b-awq":"QwQ-32B-AWQ"};
+const MODEL_COLORS = {"deepseek-r1-7b":"#6ea8fe","qwq-32b-awq":"#f4a261"};
+const CANDIDATE_METRICS = [
+  { key: "mention_prob", label: "P(mention) mass" },
+  { key: "mention_share_pct", label: "Share of tree mass %" },
+  { key: "leaf_count", label: "# leaves mentioning" },
+  { key: "good_mass", label: "P(good ∩ mention)" },
+];
+const TABLE_COLUMNS = [
+  { key: "label", label: "Model", align: "left", chartable: false, freezeDefault: true },
+  { key: "avg_max_depth", label: "Max depth", chartable: true, freezeDefault: true },
+  { key: "avg_total_nodes", label: "Nodes", chartable: true, freezeDefault: true },
+  { key: "avg_leaf_count", label: "τ-leaves", chartable: true },
+  { key: "avg_leaves", label: "Probe leaves", chartable: true, freezeDefault: true },
+  { key: "prob_good_pct", label: "P(good) %", chartable: true, highlight: true, freezeDefault: true },
+  { key: "prob_bad_pct", label: "P(bad) %", chartable: true, highlight: true },
+  { key: "leaf_accuracy_pct", label: "Leaf acc %", chartable: true },
+  { key: "avg_exclusively_bad", label: "Excl. bad", chartable: true },
+  { key: "avg_ditched", label: "Ditched", chartable: true },
+  { key: "avg_mass_above_tau", label: "Mass above τ", chartable: true },
+  { key: "avg_max_breadth", label: "Max breadth", chartable: true },
+  { key: "bad_nodes_analyzed", label: "Analyzed", chartable: true },
+];
+
+let DATA = null;
+let treeProbMassIndex = new Map();
+let currentRun = null;
+let currentNodes = [];
+let leafMap = new Map();
+let statusMap = new Map();
+let exclusivelyBadHighlightSet = new Set();
+let expandedSubtreeHighlightSet = new Set();
+let statsMap = new Map();
+let expansionMap = new Map();
+let zoomBehavior = null;
+let svg = null;
+let gRoot = null;
+let selectedNodeId = null;
+let sortKey = "label";
+let sortAsc = true;
+let frozenColumnKeys = new Set(
+  TABLE_COLUMNS.filter(col => col.freezeDefault).map(col => col.key)
+);
+
+function loadFrozenColumns() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("presidentFrozenCols") || "null");
+    if (Array.isArray(saved)) {
+      frozenColumnKeys = new Set(
+        saved.filter(key => TABLE_COLUMNS.some(col => col.key === key))
+      );
+      return;
+    }
+  } catch {
+    /* use defaults */
+  }
+  frozenColumnKeys = new Set(
+    TABLE_COLUMNS.filter(col => col.freezeDefault).map(col => col.key)
+  );
+}
+
+function saveFrozenColumns() {
+  localStorage.setItem("presidentFrozenCols", JSON.stringify([...frozenColumnKeys]));
+}
+
+function renderFreezeColumnToggles() {
+  const container = document.getElementById("freezeColumnToggles");
+  if (!container) return;
+  container.innerHTML = TABLE_COLUMNS.map(col => `
+    <label title="${col.label}">
+      <input type="checkbox" data-freeze-key="${col.key}" ${frozenColumnKeys.has(col.key) ? "checked" : ""} />
+      ${col.label}
+    </label>
+  `).join("");
+  container.querySelectorAll("input[data-freeze-key]").forEach(input => {
+    input.addEventListener("change", () => {
+      const key = input.dataset.freezeKey;
+      if (input.checked) frozenColumnKeys.add(key);
+      else frozenColumnKeys.delete(key);
+      saveFrozenColumns();
+      applyFrozenColumns();
+    });
+  });
+}
+
+function applyFrozenColumns() {
+  const table = document.getElementById("summaryTable");
+  if (!table) return;
+
+  const headerCells = [...table.querySelectorAll("thead th")];
+  if (!headerCells.length) return;
+
+  const offsets = new Map();
+  let left = 0;
+  headerCells.forEach((th, index) => {
+    const key = th.dataset.key;
+    if (frozenColumnKeys.has(key)) offsets.set(index, left);
+    left += th.offsetWidth;
+  });
+
+  const isFrozenRunEnd = index => {
+    if (!offsets.has(index)) return false;
+    const nextKey = headerCells[index + 1]?.dataset.key;
+    return !nextKey || !frozenColumnKeys.has(nextKey);
+  };
+
+  const syncCell = (cell, index) => {
+    const frozen = offsets.has(index);
+    cell.classList.toggle("frozen", frozen);
+    cell.classList.toggle("frozen-last", frozen && isFrozenRunEnd(index));
+    cell.style.left = frozen ? `${offsets.get(index)}px` : "";
+    cell.style.zIndex = frozen ? String(3 + index) : "";
+  };
+
+  headerCells.forEach((th, index) => syncCell(th, index));
+  table.querySelectorAll("tbody tr").forEach(row => {
+    [...row.children].forEach((td, index) => syncCell(td, index));
+  });
+}
+
+function displayToken(token) {
+  if (!token) return "⟨prompt⟩";
+  if (token === "\n") return "\\n";
+  if (token === "\t") return "\\t";
+  if (token === " ") return "·";
+  return token;
+}
+
+function fmtProb(p) {
+  if (p >= 0.0001) return p.toFixed(4);
+  return p.toExponential(2);
+}
+
+function escapeHtml(text) {
+  return String(text).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+function fmtVal(v) {
+  if (v === null || v === undefined) return "—";
+  return v;
+}
+
+function fmtPct(v) {
+  if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
+  return Math.round(Number(v));
+}
+
+function politicianChartLabel(person) {
+  const name = person?.ballot_name || person?.full_name || String(person?.id || "?");
+  const party = person?.party ? ` (${person.party})` : "";
+  return name + party;
+}
+
+function switchTab(name) {
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.tab === name);
+  });
+  document.querySelectorAll(".panel").forEach(panel => {
+    panel.classList.toggle("active", panel.id === name + "Panel");
+  });
+  if (name === "trees" && currentRun) {
+    setTimeout(() => loadRun(currentRun.tree_key), 50);
+  }
+}
+
+function renderGlobalStats() {
+  const filtered = filteredSummaries().filter(row => row.has_bad_nodes);
+  const stats = computeFilteredLeafStats(filtered);
+  const pct = DATA.mech_interp_trees
+    ? Math.round(100 * DATA.bad_nodes_trees / DATA.mech_interp_trees)
+    : 0;
+  document.getElementById("progressFill").style.width = pct + "%";
+  document.getElementById("globalStats").innerHTML = `
+    <div class="stat"><strong>${filtered.length}</strong><span class="muted">models analyzed</span></div>
+    <div class="stat"><strong>${fmtVal(stats.avgProbeLeaves)}</strong><span class="muted">avg probe leaves</span></div>
+    <div class="stat"><strong>${fmtVal(stats.probGoodPct)}%</strong><span class="muted">P(good) mass</span></div>
+    <div class="stat"><strong>${fmtVal(stats.probBadPct)}%</strong><span class="muted">P(bad) mass</span></div>
+    <div class="stat"><strong>${fmtVal(stats.leafAccPct)}%</strong><span class="muted">leaf acc (count)</span></div>
+  `;
+}
+
+function computeFilteredLeafStats(rows) {
+  let totalMass = 0;
+  let probGood = 0;
+  let probBad = 0;
+  let probeLeaves = 0;
+  let leafGood = 0;
+  for (const row of rows) {
+    const masses = probMassForSummaryRow(row);
+    totalMass += masses.totalMass;
+    probGood += masses.probGood;
+    probBad += masses.probBad;
+    const counts = leafCountsForTreeKey(row.tree_key);
+    probeLeaves += counts.total;
+    leafGood += counts.good;
+  }
+  const pct = v => (totalMass ? Math.round(1000 * v / totalMass) / 10 : null);
+  return {
+    avgProbeLeaves: rows.length ? Math.round((probeLeaves / rows.length) * 10) / 10 : null,
+    probGoodPct: pct(probGood),
+    probBadPct: pct(probBad),
+    leafAccPct: probeLeaves ? Math.round(1000 * leafGood / probeLeaves) / 10 : null,
+  };
+}
+
+function leafCountsForTreeKey(treeKey) {
+  const leaves = Object.values(DATA.leaf_completions?.[treeKey] || {});
+  const good = leaves.filter(leaf => isLeafGood(leaf)).length;
+  return { total: leaves.length, good };
+}
+
+function filteredSummaries() {
+  const prefix = document.getElementById("prefixFilter").value;
+  const variant = document.getElementById("variantFilter").value;
+  const region = document.getElementById("summaryRegionFilter").value;
+  const country = document.getElementById("summaryCountryFilter").value;
+  return DATA.tree_summaries.filter(row => {
+    if (prefix && String(row.prefix_length) !== prefix) return false;
+    if (variant && row.instruction_variant !== variant) return false;
+    if (region && row.region_id !== region) return false;
+    if (country && row.country_id !== country) return false;
+    return true;
+  });
+}
+
+function emptyBucket() {
+  return {
+    trees: 0,
+    bad_nodes_analyzed: 0,
+    max_depth: 0,
+    total_nodes: 0,
+    leaf_count: 0,
+    mass_above_tau: 0,
+    max_breadth: 0,
+    exclusively_bad: 0,
+    ditched: 0,
+    probe_leaves: 0,
+    leaf_correct: 0,
+    prob_mass_total: 0,
+    prob_good: 0,
+    prob_bad: 0,
+    prob_other: 0,
+    _mass_n: 0,
+    _bad_metric_n: 0,
+  };
+}
+
+function probMassForSummaryRow(row) {
+  const leaves = Object.values(DATA.leaf_completions?.[row.tree_key] || {});
+  if (leaves.length) {
+    return computeLeafProbabilityMasses(leaves);
+  }
+  if (row.prob_mass_total != null && row.prob_good != null) {
+    return {
+      totalMass: Number(row.prob_mass_total) || 0,
+      probGood: Number(row.prob_good) || 0,
+      probBad: Number(row.prob_bad) || 0,
+      probOther: Number(row.prob_other) || 0,
+    };
+  }
+  return treeProbMassIndex.get(row.tree_key) || {
+    totalMass: 0,
+    probGood: 0,
+    probBad: 0,
+    probOther: 0,
+  };
+}
+
+function buildTreeProbMassIndex() {
+  const index = new Map();
+  for (const [treeKey, leafObj] of Object.entries(DATA.leaf_completions || {})) {
+    index.set(treeKey, computeDefaultLeafProbabilityMasses(Object.values(leafObj || {})));
+  }
+  return index;
+}
+
+function mentionsPresidentialCandidate(mentions, mentionCategory) {
+  if (mentionCategory === "mentioned_only_candidates") return true;
+  return (mentions || []).some(m => m.is_presidential_candidate_2026);
+}
+
+const CORRECTNESS_STORAGE_KEY = "presidentCorrectnessMode";
+
+function populateCorrectnessModeSelect(selectEl) {
+  if (!selectEl) return;
+  const candidates = DATA.presidential_candidates || [];
+  selectEl.innerHTML = [
+    '<option value="no_politicians">No politicians mentioned</option>',
+    '<option value="only_candidates">Only candidates mentioned</option>',
+    '<optgroup label="Specific candidate">',
+    ...candidates.map(c => {
+      const label = `${c.ballot_name || c.full_name} (${c.party || "?"})`;
+      return `<option value="candidate:${c.id}">Mentions ${label}</option>`;
+    }),
+    "</optgroup>",
+  ].join("");
+}
+
+function getCorrectnessModeValue() {
+  return document.getElementById("correctnessMode")?.value
+    || document.getElementById("treeCorrectnessMode")?.value
+    || localStorage.getItem(CORRECTNESS_STORAGE_KEY)
+    || "no_politicians";
+}
+
+function getCorrectnessMode() {
+  const value = getCorrectnessModeValue();
+  if (value.startsWith("candidate:")) {
+    return { type: "specific_candidate", candidateId: value.slice("candidate:".length) };
+  }
+  return { type: value };
+}
+
+function setCorrectnessMode(value) {
+  localStorage.setItem(CORRECTNESS_STORAGE_KEY, value);
+  const summarySel = document.getElementById("correctnessMode");
+  const treeSel = document.getElementById("treeCorrectnessMode");
+  if (summarySel) summarySel.value = value;
+  if (treeSel) treeSel.value = value;
+}
+
+function correctnessModeLabel() {
+  const mode = getCorrectnessMode();
+  if (mode.type === "no_politicians") return "no politicians";
+  if (mode.type === "only_candidates") return "only candidates";
+  const cand = (DATA.presidential_candidates || []).find(c => String(c.id) === String(mode.candidateId));
+  return cand ? `mentions ${cand.ballot_name || cand.full_name}` : `candidate ${mode.candidateId}`;
+}
+
+function normalizeCandidateName(text) {
+  return (text || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function resolveCandidate(candidateRef) {
+  if (candidateRef && typeof candidateRef === "object" && (candidateRef.ballot_name || candidateRef.full_name)) {
+    return candidateRef;
+  }
+  const id = String(candidateRef);
+  return (DATA.presidential_candidates || []).find(c => String(c.id) === id) || null;
+}
+
+function mentionMatchesCandidate(mention, candidate) {
+  if (!mention || !candidate) return false;
+  if (String(mention.id) === String(candidate.id)) return true;
+  const mentionBallot = normalizeCandidateName(mention.ballot_name);
+  const mentionFull = normalizeCandidateName(mention.full_name);
+  const candidateBallot = normalizeCandidateName(candidate.ballot_name);
+  const candidateFull = normalizeCandidateName(candidate.full_name);
+  if (mentionBallot && mentionBallot === candidateBallot) return true;
+  return Boolean(mentionFull && mentionFull === candidateFull);
+}
+
+function registryCandidateForMention(mention) {
+  return (DATA.presidential_candidates || []).find(c => mentionMatchesCandidate(mention, c)) || null;
+}
+
+function collectChartCandidates() {
+  const registry = [...(DATA.presidential_candidates || [])];
+  const extras = [];
+  for (const row of filteredSummaries().filter(item => item.has_bad_nodes)) {
+    for (const leaf of leavesForTree(row.tree_key)) {
+      for (const mention of leaf.mentions || []) {
+        if (!mention.is_presidential_candidate_2026) continue;
+        if (registryCandidateForMention(mention)) continue;
+        if (extras.some(extra => mentionMatchesCandidate(mention, extra))) continue;
+        extras.push({
+          id: mention.id,
+          full_name: mention.full_name,
+          ballot_name: mention.ballot_name,
+          party: mention.party,
+        });
+      }
+    }
+  }
+  return [...registry, ...extras].sort((a, b) =>
+    politicianChartLabel(a).localeCompare(politicianChartLabel(b))
+  );
+}
+
+function politicianMentionKey(mention) {
+  if (mention?.id) return String(mention.id);
+  return normalizeCandidateName(mention?.full_name) || normalizeCandidateName(mention?.ballot_name) || "";
+}
+
+function collectChartPoliticians() {
+  const people = new Map();
+  for (const row of filteredSummaries().filter(item => item.has_bad_nodes)) {
+    for (const leaf of leavesForTree(row.tree_key)) {
+      for (const mention of leaf.mentions || []) {
+        const key = politicianMentionKey(mention);
+        if (!key) continue;
+        if (!people.has(key)) {
+          people.set(key, {
+            id: mention.id,
+            full_name: mention.full_name,
+            ballot_name: mention.ballot_name,
+            party: mention.party,
+          });
+        } else if (!people.get(key).party && mention.party) {
+          people.get(key).party = mention.party;
+        }
+      }
+    }
+  }
+  const list = [...people.values()];
+  list.sort((a, b) => {
+    let massA = 0;
+    let massB = 0;
+    for (const row of filteredSummaries().filter(item => item.has_bad_nodes)) {
+      massA += computePoliticianMetricDetails(row.tree_key, a, "mention_prob").mentionMass;
+      massB += computePoliticianMetricDetails(row.tree_key, b, "mention_prob").mentionMass;
+    }
+    return massB - massA;
+  });
+  return list;
+}
+
+function leafMentionsPolitician(leaf, person) {
+  return (leaf?.mentions || []).some(mention => mentionMatchesCandidate(mention, person));
+}
+
+function leafMentionsCandidate(leaf, candidateRef) {
+  const candidate = resolveCandidate(candidateRef);
+  if (!candidate) return false;
+  return (leaf?.mentions || []).some(mention => mentionMatchesCandidate(mention, candidate));
+}
+
+function leafHasNonCandidatePoliticians(leaf) {
+  return (leaf?.mentions || []).some(m => !m.is_presidential_candidate_2026);
+}
+
+function isLeafGood(leaf) {
+  if (!leaf?.reasoning_complete) return false;
+  const mode = getCorrectnessMode();
+  const category = leaf.mention_category;
+  if (mode.type === "no_politicians") {
+    return category === "no_politicians_mentioned";
+  }
+  if (mode.type === "only_candidates") {
+    return category === "mentioned_only_candidates";
+  }
+  if (mode.type === "specific_candidate") {
+    return leafMentionsCandidate(leaf, mode.candidateId);
+  }
+  return false;
+}
+
+function onCorrectnessModeChange(value) {
+  setCorrectnessMode(value);
+  treeProbMassIndex = buildTreeProbMassIndex();
+  renderSummary();
+  if (currentRun && currentNodes.length) refreshStatsForMode();
+}
+
+function computeCandidateMentionProbs(leaves) {
+  const totals = new Map();
+  for (const leaf of leaves || []) {
+    const pathProb = Number(leaf?.path_prob) || 0;
+    for (const mention of leaf.mentions || []) {
+      if (!mention.is_presidential_candidate_2026) continue;
+      const matched = registryCandidateForMention(mention);
+      const key = matched ? String(matched.id) : String(mention.id || mention.full_name || "");
+      if (!key) continue;
+      if (!totals.has(key)) {
+        totals.set(key, {
+          id: matched?.id ?? mention.id,
+          full_name: matched?.full_name ?? mention.full_name,
+          ballot_name: matched?.ballot_name ?? mention.ballot_name,
+          party: matched?.party ?? mention.party,
+          prob: 0,
+        });
+      }
+      totals.get(key).prob += pathProb;
+    }
+  }
+  return [...totals.values()].sort((a, b) => b.prob - a.prob);
+}
+
+function leavesForTree(treeKey) {
+  return Object.values(DATA.leaf_completions?.[treeKey] || {});
+}
+
+function leavesMentioningCandidate(leaves, candidate) {
+  return leaves.filter(leaf => leafMentionsCandidate(leaf, candidate));
+}
+
+function leavesMentioningPolitician(leaves, person) {
+  return leaves.filter(leaf => leafMentionsPolitician(leaf, person));
+}
+
+function computePoliticianMetricDetails(treeKey, person, metricKey) {
+  const leaves = leavesForTree(treeKey);
+  const mentioning = leavesMentioningPolitician(leaves, person);
+  const totalMass = treeLeafMass(treeKey);
+  const mentionMass = mentioning.reduce((sum, leaf) => sum + (Number(leaf.path_prob) || 0), 0);
+  const sharePct = totalMass ? (100 * mentionMass) / totalMass : 0;
+  let value = 0;
+  switch (metricKey) {
+    case "mention_prob":
+      value = mentionMass;
+      break;
+    case "mention_share_pct":
+      value = sharePct;
+      break;
+    case "leaf_count":
+      value = mentioning.length;
+      break;
+    case "good_mass":
+      value = mentioning
+        .filter(leaf => isLeafGood(leaf))
+        .reduce((sum, leaf) => sum + (Number(leaf.path_prob) || 0), 0);
+      break;
+    default:
+      value = 0;
+  }
+  return { value, mentionMass, totalMass, sharePct };
+}
+
+function treeLeafMass(treeKey) {
+  return leavesForTree(treeKey).reduce(
+    (sum, leaf) => sum + (Number(leaf.path_prob) || 0),
+    0
+  );
+}
+
+function computeCandidateMetricDetails(treeKey, candidate, metricKey) {
+  const leaves = leavesForTree(treeKey);
+  const mentioning = leavesMentioningCandidate(leaves, candidate);
+  const totalMass = treeLeafMass(treeKey);
+  const mentionMass = mentioning.reduce((sum, leaf) => sum + (Number(leaf.path_prob) || 0), 0);
+  const sharePct = totalMass ? (100 * mentionMass) / totalMass : 0;
+  let value = 0;
+  switch (metricKey) {
+    case "mention_prob":
+      value = mentionMass;
+      break;
+    case "mention_share_pct":
+      value = sharePct;
+      break;
+    case "leaf_count":
+      value = mentioning.length;
+      break;
+    case "good_mass":
+      value = mentioning
+        .filter(leaf => isLeafGood(leaf))
+        .reduce((sum, leaf) => sum + (Number(leaf.path_prob) || 0), 0);
+      break;
+    default:
+      value = 0;
+  }
+  return { value, mentionMass, totalMass, sharePct };
+}
+
+function computeCandidateMetric(treeKey, candidate, metricKey) {
+  return computeCandidateMetricDetails(treeKey, candidate, metricKey).value;
+}
+
+function buildCandidateModelSeries(metricKey) {
+  const models = filteredSummaries().filter(row => row.has_bad_nodes);
+  const candidates = collectChartCandidates();
+  return models.map(row => {
+    const totalMass = treeLeafMass(row.tree_key);
+    return {
+      modelId: row.model_id,
+      label: MODEL_LABELS[row.model_id] || row.model_id,
+      totalMass,
+      values: candidates.map(candidate => {
+        const details = computeCandidateMetricDetails(row.tree_key, candidate, metricKey);
+        return {
+          candidateId: candidate.id,
+          label: politicianChartLabel(candidate),
+          value: details.value,
+          mentionMass: details.mentionMass,
+          totalMass: details.totalMass,
+          sharePct: details.sharePct,
+        };
+      }),
+    };
+  });
+}
+
+function buildPoliticianModelSeries(metricKey) {
+  const models = filteredSummaries().filter(row => row.has_bad_nodes);
+  const politicians = collectChartPoliticians();
+  return models.map(row => {
+    const totalMass = treeLeafMass(row.tree_key);
+    return {
+      modelId: row.model_id,
+      label: MODEL_LABELS[row.model_id] || row.model_id,
+      totalMass,
+      values: politicians.map(person => {
+        const details = computePoliticianMetricDetails(row.tree_key, person, metricKey);
+        return {
+          politicianId: person.id,
+          label: politicianChartLabel(person),
+          value: details.value,
+          mentionMass: details.mentionMass,
+          totalMass: details.totalMass,
+          sharePct: details.sharePct,
+        };
+      }),
+    };
+  });
+}
+
+function renderGroupedMentionModelChart({
+  svgId,
+  titleElId,
+  hintElId,
+  entities,
+  series,
+  metricKey,
+  entityNoun,
+  emptyMessage,
+}) {
+  const metricLabel = CANDIDATE_METRICS.find(item => item.key === metricKey)?.label || metricKey;
+  const showLeafMassContext = metricKey === "mention_prob";
+  const showShareLabels = showLeafMassContext || metricKey === "mention_share_pct";
+  const svgEl = d3.select(`#${svgId}`);
+  svgEl.selectAll("*").remove();
+
+  document.getElementById(titleElId).textContent = showLeafMassContext
+    ? `${metricLabel} by ${entityNoun} and model (vs Σ leaves)`
+    : `${metricLabel} by ${entityNoun} and model`;
+
+  const massHints = series
+    .map(item => `${item.label} Σ=${fmtProb(item.totalMass)}`)
+    .join(" · ");
+  document.getElementById(hintElId).textContent = showLeafMassContext
+    ? `Bar height = P(mention); dashed line = Σ leaf path mass · ${massHints} · correct if: ${correctnessModeLabel()}`
+    : `Grouped bars per model · correct if: ${correctnessModeLabel()} · ${series.length} model(s)`;
+
+  if (!entities.length || !series.length) {
+    svgEl.append("text")
+      .attr("x", 12)
+      .attr("y", 24)
+      .attr("fill", "var(--muted)")
+      .text(emptyMessage);
+    return;
+  }
+
+  const width = svgEl.node()?.clientWidth || 600;
+  const height = 300;
+  const margin = { top: 48, right: 72, bottom: 96, left: 48 };
+  const innerW = width - margin.left - margin.right;
+  const innerH = height - margin.top - margin.bottom;
+  const g = svgEl.attr("viewBox", `0 0 ${width} ${height}`).append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+  const entityLabels = entities.map(entity => politicianChartLabel(entity));
+  const x0 = d3.scaleBand().domain(entityLabels).range([0, innerW]).padding(0.2);
+  const x1 = d3.scaleBand().domain(series.map(s => s.modelId)).range([0, x0.bandwidth()]).padding(0.08);
+  const maxBar = d3.max(series.flatMap(s => s.values.map(v => v.value))) || 0;
+  const maxTotal = d3.max(series, s => s.totalMass) || 0;
+  const maxVal = Math.max(maxBar, showLeafMassContext ? maxTotal : 0, 1e-9);
+  const y = d3.scaleLinear().domain([0, maxVal]).nice().range([innerH, 0]);
+
+  const legend = g.append("g").attr("transform", "translate(0, -34)");
+  series.forEach((item, index) => {
+    const gx = index * 190;
+    legend.append("rect")
+      .attr("x", gx)
+      .attr("y", 0)
+      .attr("width", 10)
+      .attr("height", 10)
+      .attr("fill", MODEL_COLORS[item.modelId] || "var(--accent)");
+    legend.append("text")
+      .attr("x", gx + 14)
+      .attr("y", 9)
+      .attr("fill", "var(--muted)")
+      .attr("font-size", "11px")
+      .text(`${item.label}${showLeafMassContext ? ` (Σ=${fmtProb(item.totalMass)})` : ""}`);
+  });
+
+  if (showLeafMassContext) {
+    series.forEach(item => {
+      g.append("line")
+        .attr("x1", 0)
+        .attr("x2", innerW)
+        .attr("y1", y(item.totalMass))
+        .attr("y2", y(item.totalMass))
+        .attr("stroke", MODEL_COLORS[item.modelId] || "var(--accent)")
+        .attr("stroke-dasharray", "5,4")
+        .attr("stroke-width", 1.5)
+        .attr("opacity", 0.75);
+      g.append("text")
+        .attr("x", innerW + 4)
+        .attr("y", y(item.totalMass))
+        .attr("dy", "0.32em")
+        .attr("fill", MODEL_COLORS[item.modelId] || "var(--accent)")
+        .attr("font-size", "10px")
+        .text(`Σ ${fmtProb(item.totalMass)}`);
+    });
+  }
+
+  g.append("g")
+    .attr("transform", `translate(0,${innerH})`)
+    .call(d3.axisBottom(x0))
+    .selectAll("text")
+    .attr("transform", "rotate(-35)")
+    .style("text-anchor", "end")
+    .attr("dx", "-0.4em")
+    .attr("dy", "0.2em")
+    .attr("fill", "var(--muted)")
+    .attr("font-size", "10px");
+
+  g.append("g")
+    .call(d3.axisLeft(y).ticks(5))
+    .attr("color", "#555");
+
+  const modelGroups = g.selectAll(".model-group")
+    .data(series)
+    .join("g")
+    .attr("class", "model-group")
+    .attr("fill", d => MODEL_COLORS[d.modelId] || "var(--accent)");
+
+  modelGroups.selectAll("rect")
+    .data(d => d.values.map(v => ({ ...v, modelId: d.modelId, modelLabel: d.label })))
+    .join("rect")
+    .attr("x", d => x0(d.label) + x1(d.modelId))
+    .attr("y", d => y(d.value))
+    .attr("width", x1.bandwidth())
+    .attr("height", d => Math.max(0, innerH - y(d.value)))
+    .attr("rx", 2)
+    .attr("title", d => {
+      if (showLeafMassContext) {
+        return `${d.modelLabel} · ${d.label}\nP(mention)=${fmtProb(d.mentionMass)} · Σ leaves=${fmtProb(d.totalMass)} · ${fmtPct(d.sharePct)}% of Σ`;
+      }
+      if (metricKey === "mention_share_pct") {
+        return `${d.modelLabel} · ${d.label} · ${fmtPct(d.value)}% of Σ`;
+      }
+      return `${d.modelLabel} · ${d.label} · ${fmtVal(d.value)}`;
+    });
+
+  if (showShareLabels) {
+    modelGroups.selectAll(".bar-label")
+      .data(d => d.values.map(v => ({ ...v, modelId: d.modelId })))
+      .join("text")
+      .attr("class", "bar-label")
+      .attr("x", d => x0(d.label) + x1(d.modelId) + x1.bandwidth() / 2)
+      .attr("y", d => y(d.value) - 4)
+      .attr("text-anchor", "middle")
+      .attr("fill", "var(--muted)")
+      .attr("font-size", "9px")
+      .text(d => {
+        if (d.value <= 0) return "";
+        const pct = metricKey === "mention_share_pct" ? d.value : d.sharePct;
+        return `${fmtPct(pct)}%`;
+      });
+  }
+}
+
+function renderGroupedCandidateModelChart() {
+  const metricKey = document.getElementById("candidateMetricSelect")?.value || "mention_prob";
+  renderGroupedMentionModelChart({
+    svgId: "candidateChart",
+    titleElId: "candidateChartTitle",
+    hintElId: "candidateChartHint",
+    entities: collectChartCandidates(),
+    series: buildCandidateModelSeries(metricKey),
+    metricKey,
+    entityNoun: "candidate",
+    emptyMessage: "No candidate or model data for current filters",
+  });
+}
+
+function renderGroupedPoliticianModelChart() {
+  const metricKey = document.getElementById("candidateMetricSelect")?.value || "mention_prob";
+  renderGroupedMentionModelChart({
+    svgId: "politicianChart",
+    titleElId: "politicianChartTitle",
+    hintElId: "politicianChartHint",
+    entities: collectChartPoliticians(),
+    series: buildPoliticianModelSeries(metricKey),
+    metricKey,
+    entityNoun: "politician",
+    emptyMessage: "No politician or model data for current filters",
+  });
+}
+
+function renderCandidateBarChart(svgId, entries, titleEl, hintEl, hintText, totalMass) {
+  const svgEl = d3.select(`#${svgId}`);
+  svgEl.selectAll("*").remove();
+  if (titleEl) titleEl.textContent = titleEl.dataset.defaultTitle || titleEl.textContent;
+  const massLine = totalMass != null ? ` · Σ leaves=${fmtProb(totalMass)}` : "";
+  if (hintEl) hintEl.textContent = (hintText || "") + massLine;
+
+  if (!entries.length) {
+    svgEl.append("text")
+      .attr("x", 12)
+      .attr("y", 24)
+      .attr("fill", "var(--muted)")
+      .text("No candidate mentions in filtered trees");
+    return;
+  }
+
+  const width = svgEl.node()?.clientWidth || 600;
+  const height = svgId === "runCandidateChart" ? 220 : 280;
+  const margin = { top: 12, right: 12, bottom: 80, left: 120 };
+  const innerW = width - margin.left - margin.right;
+  const innerH = height - margin.top - margin.bottom;
+  const g = svgEl.attr("viewBox", `0 0 ${width} ${height}`).append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+  const enriched = entries.map(entry => ({
+    ...entry,
+    chartLabel: politicianChartLabel(entry),
+    sharePct: totalMass ? (100 * entry.prob) / totalMass : null,
+  }));
+
+  const y = d3.scaleBand()
+    .domain(enriched.map(d => d.chartLabel))
+    .range([0, innerH])
+    .padding(0.15);
+  const maxProb = d3.max(enriched, d => d.prob) || 0;
+  const xMax = Math.max(maxProb, totalMass || 0, 1e-9);
+  const x = d3.scaleLinear()
+    .domain([0, xMax])
+    .nice()
+    .range([0, innerW]);
+
+  if (totalMass != null) {
+    g.append("line")
+      .attr("x1", x(totalMass))
+      .attr("x2", x(totalMass))
+      .attr("y1", 0)
+      .attr("y2", innerH)
+      .attr("stroke", "var(--accent)")
+      .attr("stroke-dasharray", "5,4")
+      .attr("opacity", 0.75);
+    g.append("text")
+      .attr("x", x(totalMass))
+      .attr("y", -4)
+      .attr("text-anchor", "middle")
+      .attr("fill", "var(--muted)")
+      .attr("font-size", "10px")
+      .text(`Σ ${fmtProb(totalMass)}`);
+  }
+
+  g.append("g")
+    .call(d3.axisLeft(y).tickSize(0))
+    .call(sel => sel.select(".domain").remove())
+    .selectAll("text")
+    .attr("fill", "var(--muted)")
+    .style("font-size", "11px");
+
+  g.append("g")
+    .attr("transform", `translate(0,${innerH})`)
+    .call(d3.axisBottom(x).ticks(5).tickFormat(d3.format(".3f")))
+    .call(sel => sel.select(".domain").attr("stroke", "var(--border)"))
+    .selectAll("text")
+    .attr("fill", "var(--muted)");
+
+  g.selectAll("rect")
+    .data(enriched)
+    .join("rect")
+    .attr("y", d => y(d.chartLabel))
+    .attr("x", 0)
+    .attr("height", y.bandwidth())
+    .attr("width", d => x(d.prob))
+    .attr("fill", "var(--accent)")
+    .attr("title", d => {
+      const share = d.sharePct != null ? ` · ${fmtPct(d.sharePct)}% of Σ` : "";
+      return `${d.chartLabel} · P(mention)=${fmtProb(d.prob)}${share}`;
+    });
+
+  if (totalMass != null) {
+    g.selectAll(".bar-label")
+      .data(enriched.filter(d => d.prob > 0))
+      .join("text")
+      .attr("class", "bar-label")
+      .attr("x", d => x(d.prob) + 4)
+      .attr("y", d => y(d.chartLabel) + y.bandwidth() / 2)
+      .attr("dy", "0.32em")
+      .attr("fill", "var(--muted)")
+      .attr("font-size", "10px")
+      .text(d => `${fmtPct(d.sharePct)}%`);
+  }
+}
+
+function computeDefaultLeafProbabilityMasses(leaves) {
+  let totalMass = 0;
+  let probGood = 0;
+  let probBad = 0;
+  for (const leaf of leaves) {
+    const pathProb = Number(leaf?.path_prob) || 0;
+    totalMass += pathProb;
+    if (isLeafGood(leaf)) probGood += pathProb;
+    else probBad += pathProb;
+  }
+  return { totalMass, probGood, probBad, probOther: 0 };
+}
+
+function addToBucket(bucket, row) {
+  bucket.trees += 1;
+  if (row.max_depth != null) bucket.max_depth += row.max_depth;
+  if (row.total_nodes != null) bucket.total_nodes += row.total_nodes;
+  if (row.leaf_count != null) bucket.leaf_count += row.leaf_count;
+  if (row.mass_above_tau != null) { bucket.mass_above_tau += row.mass_above_tau; bucket._mass_n += 1; }
+  if (row.max_breadth != null) bucket.max_breadth += row.max_breadth;
+  if (row.has_bad_nodes) {
+    bucket.bad_nodes_analyzed += 1;
+    bucket._bad_metric_n += 1;
+    bucket.exclusively_bad += row.exclusively_bad_count || 0;
+    bucket.ditched += row.ditched_count || 0;
+    const counts = leafCountsForTreeKey(row.tree_key);
+    bucket.probe_leaves += counts.total;
+    bucket.leaf_correct += counts.good;
+    const masses = probMassForSummaryRow(row);
+    bucket.prob_mass_total += masses.totalMass;
+    bucket.prob_good += masses.probGood;
+    bucket.prob_bad += masses.probBad;
+    bucket.prob_other += masses.probOther;
+  }
+}
+
+function finalizeBucket(key, label, bucket) {
+  const trees = bucket.trees || 1;
+  const badN = bucket._bad_metric_n || 0;
+  const probeLeaves = bucket.probe_leaves || 0;
+  const round2 = v => (v == null ? null : Math.round(v * 100) / 100);
+  const round1 = v => (v == null ? null : Math.round(v * 10) / 10);
+  return {
+    key,
+    label,
+    trees: bucket.trees,
+    bad_nodes_analyzed: bucket.bad_nodes_analyzed,
+    avg_max_depth: round2(bucket.max_depth / trees),
+    avg_total_nodes: round2(bucket.total_nodes / trees),
+    avg_leaf_count: round2(bucket.leaf_count / trees),
+    avg_mass_above_tau: bucket._mass_n ? round2(bucket.mass_above_tau / bucket._mass_n) : null,
+    avg_max_breadth: round2(bucket.max_breadth / trees),
+    avg_exclusively_bad: badN ? round2(bucket.exclusively_bad / badN) : null,
+    avg_ditched: badN ? round2(bucket.ditched / badN) : null,
+    avg_leaves: badN ? round2(bucket.probe_leaves / badN) : null,
+    leaf_accuracy_pct: probeLeaves ? round1(100 * bucket.leaf_correct / probeLeaves) : null,
+    prob_good_pct: bucket.prob_mass_total
+      ? round1(100 * bucket.prob_good / bucket.prob_mass_total) : null,
+    prob_bad_pct: bucket.prob_mass_total
+      ? round1(100 * bucket.prob_bad / bucket.prob_mass_total) : null,
+    prob_other_pct: bucket.prob_mass_total
+      ? round1(100 * bucket.prob_other / bucket.prob_mass_total) : null,
+  };
+}
+
+function groupMeta(row, dimension) {
+  if (dimension === "whole") return { key: "all", label: "All (filtered)" };
+  if (dimension === "by_region") return { key: row.region_id, label: row.region_label };
+  if (dimension === "by_country") {
+    return {
+      key: row.country_id,
+      label: MODEL_LABELS[row.country_id] || row.country_name,
+    };
+  }
+  if (dimension === "by_prefix_length") return { key: String(row.prefix_length), label: `prefix ${row.prefix_length}` };
+  return { key: row.instruction_variant, label: row.instruction_variant };
+}
+
+function aggregateSummaries(rows, dimension) {
+  if (!rows.length) return [];
+  if (dimension === "whole") {
+    const bucket = emptyBucket();
+    rows.forEach(row => addToBucket(bucket, row));
+    return [finalizeBucket("all", "All (filtered)", bucket)];
+  }
+  const buckets = new Map();
+  const labels = new Map();
+  for (const row of rows) {
+    const meta = groupMeta(row, dimension);
+    if (!buckets.has(meta.key)) buckets.set(meta.key, emptyBucket());
+    labels.set(meta.key, meta.label);
+    addToBucket(buckets.get(meta.key), row);
+  }
+  return [...buckets.entries()]
+    .map(([key, bucket]) => finalizeBucket(key, labels.get(key), bucket))
+    .sort((a, b) => {
+      if (dimension === "by_prefix_length") return Number(a.key) - Number(b.key);
+      return a.label.localeCompare(b.label);
+    });
+}
+
+function currentAggRows() {
+  const dimension = document.getElementById("aggSelect").value;
+  return aggregateSummaries(filteredSummaries(), dimension);
+}
+
+function updateFilterHint() {
+  const rows = filteredSummaries();
+  const dimension = document.getElementById("aggSelect").value;
+  const aggRows = aggregateSummaries(rows, dimension);
+  const hints = [];
+  if (document.getElementById("prefixFilter").value) {
+    hints.push(`prefix ${document.getElementById("prefixFilter").value}`);
+  }
+  if (document.getElementById("variantFilter").value) {
+    hints.push(document.getElementById("variantFilter").value);
+  }
+  if (document.getElementById("summaryRegionFilter").value) {
+    hints.push("region filter on");
+  }
+  if (document.getElementById("summaryCountryFilter").value) {
+    hints.push("country filter on");
+  }
+  const filterText = hints.length ? `Filters: ${hints.join(", ")} · ` : "";
+  document.getElementById("filterHint").textContent =
+    `${filterText}Correct if: ${correctnessModeLabel()} · ${rows.length} trees · ${aggRows.length} groups` +
+    (dimension === "by_country" && !document.getElementById("prefixFilter").value
+      ? " — pick a country + aggregate by prefix length to compare prefixes" : "") +
+    (dimension === "by_prefix_length" && !document.getElementById("summaryCountryFilter").value
+      ? " — pick a prefix + aggregate by country to compare countries" : "");
+}
+
+function populateSummaryFilters() {
+  const prefixSel = document.getElementById("prefixFilter");
+  prefixSel.innerHTML = '<option value="">All prefixes</option>' +
+    (DATA.prefix_lengths || []).map(pl => `<option value="${pl}">${pl}</option>`).join("");
+
+  const regionSel = document.getElementById("summaryRegionFilter");
+  regionSel.innerHTML = '<option value="">All regions</option>' +
+    (DATA.regions || []).map(r => `<option value="${r.id}">${r.label}</option>`).join("");
+
+  const variantSel = document.getElementById("variantFilter");
+  variantSel.innerHTML = '<option value="">All prompts</option>' +
+    (DATA.instruction_variants || []).map(v => `<option value="${v}">${v}</option>`).join("");
+
+  const countries = [...new Map(DATA.tree_summaries.map(r => [r.country_id, r.country_name])).entries()]
+    .sort((a, b) => a[1].localeCompare(b[1]));
+  const countrySel = document.getElementById("summaryCountryFilter");
+  countrySel.innerHTML = '<option value="">All countries</option>' +
+    countries.map(([id, name]) => `<option value="${id}">${name}</option>`).join("");
+
+  const metricSel = document.getElementById("metricSelect");
+  metricSel.innerHTML = TABLE_COLUMNS
+    .filter(col => col.chartable)
+    .map(col => `<option value="${col.key}">${col.label}</option>`)
+    .join("");
+  metricSel.value = "prob_good_pct";
+  loadFrozenColumns();
+  renderFreezeColumnToggles();
+  document.getElementById("freezeDefaultBtn")?.addEventListener("click", () => {
+    frozenColumnKeys = new Set(
+      TABLE_COLUMNS.filter(col => col.freezeDefault).map(col => col.key)
+    );
+    saveFrozenColumns();
+    renderFreezeColumnToggles();
+    applyFrozenColumns();
+  });
+  document.getElementById("freezeClearBtn")?.addEventListener("click", () => {
+    frozenColumnKeys = new Set();
+    saveFrozenColumns();
+    renderFreezeColumnToggles();
+    applyFrozenColumns();
+  });
+}
+
+function sortRows(rows) {
+  return rows.sort((a, b) => {
+    const av = a[sortKey], bv = b[sortKey];
+    if (av === bv) return 0;
+    if (av === null || av === undefined) return 1;
+    if (bv === null || bv === undefined) return -1;
+    if (typeof av === "string") return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+    return sortAsc ? av - bv : bv - av;
+  });
+}
+
+function renderSummaryTable(rows) {
+  const sorted = sortRows([...rows]);
+  const thead = document.querySelector("#summaryTable thead");
+  const tbody = document.querySelector("#summaryTable tbody");
+  thead.innerHTML = "<tr>" + TABLE_COLUMNS.map(col => {
+    const arrow = sortKey === col.key ? (sortAsc ? " ▲" : " ▼") : "";
+    const cls = col.highlight ? ' class="highlight"' : "";
+    return `<th data-key="${col.key}"${cls} style="text-align:${col.align || "right"}">${col.label}${arrow}</th>`;
+  }).join("") + "</tr>";
+  tbody.innerHTML = sorted.map(row => "<tr>" + TABLE_COLUMNS.map(col =>
+    `<td data-key="${col.key}" class="${col.highlight ? "highlight" : ""}" style="text-align:${col.align || "right"}">${fmtVal(row[col.key])}</td>`
+  ).join("") + "</tr>").join("");
+  thead.querySelectorAll("th").forEach(th => {
+    th.addEventListener("click", () => {
+      const key = th.dataset.key;
+      if (sortKey === key) sortAsc = !sortAsc;
+      else { sortKey = key; sortAsc = key === "label"; }
+      renderSummary();
+    });
+  });
+  requestAnimationFrame(() => applyFrozenColumns());
+}
+
+function renderBarChart(rows, metricKey) {
+  const svgEl = d3.select("#barChart");
+  svgEl.selectAll("*").remove();
+  const width = svgEl.node().clientWidth || 600;
+  const height = 280;
+  const margin = { top: 12, right: 12, bottom: 80, left: 48 };
+  const innerW = width - margin.left - margin.right;
+  const innerH = height - margin.top - margin.bottom;
+  const g = svgEl.attr("viewBox", `0 0 ${width} ${height}`).append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+  const data = rows.filter(r => r[metricKey] !== null && r[metricKey] !== undefined);
+  if (!data.length) {
+    document.getElementById("barChartTitle").textContent = "No data for selected column";
+    return;
+  }
+  const x = d3.scaleBand().domain(data.map(d => d.label)).range([0, innerW]).padding(0.2);
+  const minVal = Math.min(0, d3.min(data, d => d[metricKey]) || 0);
+  const maxVal = d3.max(data, d => d[metricKey]) || 1;
+  const y = d3.scaleLinear().domain([minVal, maxVal]).nice().range([innerH, 0]);
+
+  g.append("g").attr("transform", `translate(0,${innerH})`)
+    .call(d3.axisBottom(x))
+    .selectAll("text")
+    .attr("transform", "rotate(-35)")
+    .style("text-anchor", "end")
+    .attr("fill", "#9aa0a6")
+    .attr("font-size", "10px");
+
+  g.append("g").call(d3.axisLeft(y).ticks(5)).attr("color", "#555");
+
+  g.selectAll(".bar")
+    .data(data)
+    .join("rect")
+    .attr("class", "bar")
+    .attr("x", d => x(d.label))
+    .attr("y", d => y(Math.max(d[metricKey], 0)))
+    .attr("width", x.bandwidth())
+    .attr("height", d => Math.abs(y(d[metricKey]) - y(0)))
+    .attr("fill", "var(--accent)")
+    .attr("rx", 3);
+
+  const metricLabel = document.getElementById("metricSelect").selectedOptions[0].textContent;
+  document.getElementById("barChartTitle").textContent = metricLabel + " by group";
+}
+
+function renderSummary() {
+  updateFilterHint();
+  const rows = currentAggRows();
+  const metricKey = document.getElementById("metricSelect").value;
+  renderSummaryTable(rows);
+  renderBarChart(rows, metricKey);
+  renderGroupedCandidateModelChart();
+  renderGroupedPoliticianModelChart();
+  renderGlobalStats();
+}
+
+function populateTreeFilters() {
+  const regionSel = document.getElementById("regionFilter");
+  const countrySel = document.getElementById("countryFilter");
+  const regions = [...new Set(DATA.runs.map(r => r.region_id))].sort();
+  const countries = [...new Map(DATA.runs.map(r => [r.country_id, r.country_name])).entries()]
+    .sort((a, b) => a[1].localeCompare(b[1]));
+
+  regionSel.innerHTML = '<option value="">All regions</option>' +
+    regions.map(r => {
+      const label = (DATA.regions || []).find(x => x.id === r)?.label || r;
+      return `<option value="${r}">${label}</option>`;
+    }).join("");
+
+  countrySel.innerHTML = '<option value="">All countries</option>' +
+    countries.map(([id, name]) => `<option value="${id}">${name}</option>`).join("");
+}
+
+function filteredRuns() {
+  const region = document.getElementById("regionFilter").value;
+  const country = document.getElementById("countryFilter").value;
+  return DATA.runs.filter(r => {
+    if (region && r.region_id !== region) return false;
+    if (country && r.country_id !== country) return false;
+    return true;
+  });
+}
+
+function refreshRunSelect(keepKey) {
+  const runSelect = document.getElementById("runSelect");
+  const runs = filteredRuns();
+  runSelect.innerHTML = "";
+  runs.forEach(run => {
+    const opt = document.createElement("option");
+    opt.value = run.tree_key;
+    const bad = run.summary?.exclusively_bad_count ?? "?";
+    opt.textContent = `${MODEL_LABELS[run.model_id] || run.country_name} · pl ${run.prefix_length} · ${bad} bad`;
+    runSelect.appendChild(opt);
+  });
+  if (!runs.length) return;
+  const target = runs.find(r => r.tree_key === keepKey) || runs[0];
+  runSelect.value = target.tree_key;
+  loadRun(target.tree_key);
+}
+
+function leafDescendants(nodes, nodeId) {
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  function walk(id) {
+    const node = byId[id];
+    if (!node.c || !node.c.length) return [id];
+    return node.c.flatMap(walk);
+  }
+  return walk(nodeId);
+}
+
+const BAD_SUBTYPE_OPTIONS = [
+  { id: "mentioned_candidates", label: "mentioned candidates" },
+  { id: "mentioned_politicians", label: "mentioned politicians" },
+  { id: "no_politicians_mentioned", label: "no politicians mentioned" },
+  { id: "incomplete", label: "incomplete" },
+  { id: "empty", label: "no answer" },
+];
+
+function activeBadSubtypes() {
+  return BAD_SUBTYPE_OPTIONS
+    .filter(item => document.getElementById(`badFilter_${item.id}`)?.checked)
+    .map(item => item.id);
+}
+
+function setBadSubtypeFilters(subtypes) {
+  const active = new Set(subtypes);
+  for (const item of BAD_SUBTYPE_OPTIONS) {
+    const el = document.getElementById(`badFilter_${item.id}`);
+    if (el) el.checked = active.has(item.id);
+  }
+}
+
+function badFilterLegend() {
+  const active = activeBadSubtypes();
+  if (!active.length) return "bad = none selected (nothing counts as bad)";
+  const labels = BAD_SUBTYPE_OPTIONS
+    .filter(item => active.includes(item.id))
+    .map(item => item.label);
+  return `bad = ${labels.join(", ")}`;
+}
+
+const SUBTYPE_LABELS = {
+  correct: "matches criterion",
+  mentioned_candidates: "mentioned candidates",
+  mentioned_politicians: "mentioned politicians",
+  no_politicians_mentioned: "no politicians mentioned",
+  incomplete: "incomplete",
+  empty: "no answer",
+};
+
+function classifyBadSubtypes(leaf) {
+  if (!leaf) return ["empty"];
+  if (isLeafGood(leaf)) return ["correct"];
+  const subtypes = [];
+  if (!leaf.reasoning_complete) subtypes.push("incomplete");
+  if (!leaf.answer_text || !String(leaf.answer_text).trim()) subtypes.push("empty");
+  if (leaf.reasoning_complete) {
+    const mentions = leaf.mentions || [];
+    const category = leaf.mention_category;
+    if (category === "no_politicians_mentioned" || !mentions.length) {
+      subtypes.push("no_politicians_mentioned");
+    }
+    if (leafHasNonCandidatePoliticians(leaf) || category === "mentioned_politicians") {
+      subtypes.push("mentioned_politicians");
+    }
+    if (mentionsPresidentialCandidate(mentions, category)) {
+      subtypes.push("mentioned_candidates");
+    }
+  }
+  return subtypes.length ? subtypes : ["mentioned_candidates"];
+}
+
+function isLeafBad(leaf) {
+  const subtypes = classifyBadSubtypes(leaf);
+  if (subtypes.includes("correct")) return false;
+  const active = activeBadSubtypes();
+  if (!active.length) return false;
+  return subtypes.some(subtype => active.includes(subtype));
+}
+
+function isLeafCorrect(leaf) {
+  return classifyBadSubtypes(leaf).includes("correct");
+}
+
+function isLeafNeutral(leaf) {
+  return leaf && !isLeafCorrect(leaf) && !isLeafBad(leaf);
+}
+
+function computeLeafProbabilityMasses(leaves) {
+  let totalMass = 0;
+  let probGood = 0;
+  let probBad = 0;
+  let probOther = 0;
+  for (const leaf of leaves) {
+    const pathProb = Number(leaf?.path_prob) || 0;
+    totalMass += pathProb;
+    if (isLeafCorrect(leaf)) probGood += pathProb;
+    else if (isLeafBad(leaf)) probBad += pathProb;
+    else probOther += pathProb;
+  }
+  const pct = v => (totalMass ? Math.round((1000 * v) / totalMass) / 10 : null);
+  return {
+    totalMass,
+    probGood,
+    probBad,
+    probOther,
+    probGoodPct: pct(probGood),
+    probBadPct: pct(probBad),
+    probOtherPct: pct(probOther),
+  };
+}
+
+function classifyNodeColor(nBad, nGood, nLeaves) {
+  if (nBad === nLeaves) return "exclusively_bad";
+  if (nGood === nLeaves) return "exclusively_good";
+  if (nBad / nLeaves > 0.75) return "mostly_bad";
+  return "mixed";
+}
+
+function computeNodeErrorStatsMap(nodes, leafMap) {
+  const stats = new Map();
+  for (const node of nodes) {
+    const leafIds = leafDescendants(nodes, node.id);
+    if (!leafIds.length) continue;
+    const leaves = leafIds.map(id => leafMap.get(id)).filter(Boolean);
+    const nBad = leaves.filter(leaf => isLeafBad(leaf)).length;
+    const nGood = leaves.filter(leaf => isLeafCorrect(leaf)).length;
+    const nNeutral = leaves.length - nBad - nGood;
+    const nLeaves = leaves.length;
+    const badPct = nBad / nLeaves;
+    stats.set(node.id, {
+      n_leaves: nLeaves,
+      n_bad: nBad,
+      n_good: nGood,
+      n_neutral: nNeutral,
+      bad_pct: badPct,
+      bad_pct_display: Math.round(badPct * 1000) / 10,
+      color_class: classifyNodeColor(nBad, nGood, nLeaves),
+    });
+  }
+  return stats;
+}
+
+function buildParentMap(nodes) {
+  const parent = new Map();
+  for (const node of nodes) {
+    for (const childId of node.c || []) parent.set(childId, node.id);
+  }
+  return parent;
+}
+
+function recomputeExclusivelyBadHighlight(nodes) {
+  exclusivelyBadHighlightSet = new Set();
+  if (!nodes.length) return;
+  const parentMap = buildParentMap(nodes);
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+
+  function addAncestors(nodeId) {
+    let id = nodeId;
+    while (id) {
+      exclusivelyBadHighlightSet.add(id);
+      id = parentMap.get(id);
+    }
+  }
+
+  function addDescendants(nodeId) {
+    function walk(id) {
+      exclusivelyBadHighlightSet.add(id);
+      const node = byId[id];
+      if (!node?.c?.length) return;
+      for (const childId of node.c) walk(childId);
+    }
+    walk(nodeId);
+  }
+
+  for (const [nodeId, status] of statusMap.entries()) {
+    if (status === "exclusively_bad") {
+      addAncestors(nodeId);
+      addDescendants(nodeId);
+    }
+  }
+}
+
+function recomputeExpandedSubtreeHighlight(nodes) {
+  expandedSubtreeHighlightSet = new Set();
+  if (!nodes.length || !expansionMap.size) return;
+  const parentMap = buildParentMap(nodes);
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+
+  function addAncestors(nodeId) {
+    let id = nodeId;
+    while (id) {
+      expandedSubtreeHighlightSet.add(id);
+      id = parentMap.get(id);
+    }
+  }
+
+  function addDescendants(nodeId) {
+    function walk(id) {
+      expandedSubtreeHighlightSet.add(id);
+      const node = byId[id];
+      if (!node?.c?.length) return;
+      for (const childId of node.c) walk(childId);
+    }
+    walk(nodeId);
+  }
+
+  for (const nodeId of expansionMap.keys()) {
+    addAncestors(nodeId);
+    addDescendants(nodeId);
+  }
+}
+
+function isExclusivelyBadHighlighted(nodeId) {
+  return exclusivelyBadHighlightSet.has(nodeId);
+}
+
+function isExpandedSubtreeHighlighted(nodeId) {
+  return expandedSubtreeHighlightSet.has(nodeId);
+}
+
+function recomputeCandidateStatus(nodes, leafMap) {
+  const status = new Map();
+  for (const node of nodes) {
+    if (!node.c || !node.c.length) continue;
+    const leafIds = leafDescendants(nodes, node.id);
+    if (leafIds.length < 2) continue;
+    const anyCorrect = leafIds.some(id => isLeafCorrect(leafMap.get(id)));
+    status.set(node.id, anyCorrect ? "ditched" : "exclusively_bad");
+  }
+  return status;
+}
+
+function refreshStatsForMode() {
+  if (!currentRun || !currentNodes.length) return;
+  document.getElementById("badModeLegend").textContent = badFilterLegend();
+  statsMap = computeNodeErrorStatsMap(currentNodes, leafMap);
+  statusMap = recomputeCandidateStatus(currentNodes, leafMap);
+  recomputeExclusivelyBadHighlight(currentNodes);
+  recomputeExpandedSubtreeHighlight(currentNodes);
+  renderRunMeta(currentRun);
+  renderBadNodeList(currentRun);
+  renderDetailPanel(selectedNodeId);
+  const minProb = parseFloat(document.getElementById("probFilter").value);
+  drawGraph(currentNodes, minProb);
+}
+
+function treePositions(nodes, rootId = "root") {
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  function leafIds(nodeId) {
+    const node = byId[nodeId];
+    if (!node.c || !node.c.length) return [nodeId];
+    return node.c.flatMap(leafIds);
+  }
+  const leafOrder = leafIds(rootId);
+  const leafX = Object.fromEntries(leafOrder.map((id, i) => [id, i]));
+  const positions = {};
+  function assign(nodeId) {
+    const node = byId[nodeId];
+    let x;
+    if (!node.c || !node.c.length) x = leafX[nodeId];
+    else x = node.c.reduce((sum, cid) => sum + assign(cid), 0) / node.c.length;
+    positions[nodeId] = { x, y: -node.d };
+    return x;
+  }
+  assign(rootId);
+  return positions;
+}
+
+function buildEdges(nodes, minProb) {
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  const edges = [];
+  for (const node of nodes) {
+    for (const childId of node.c || []) {
+      const child = byId[childId];
+      if (!child || child.p < minProb) continue;
+      edges.push({ source: node.id, target: childId, prob: child.p, token: child.tok || "?" });
+    }
+  }
+  return edges;
+}
+
+function visibleNodeIds(edges) {
+  const ids = new Set(["root"]);
+  edges.forEach(e => { ids.add(e.source); ids.add(e.target); });
+  return ids;
+}
+
+function nodeFill(node) {
+  const stats = statsMap.get(node.id);
+  if (stats) {
+    if (stats.color_class === "exclusively_bad") return "var(--bad-node)";
+    if (stats.color_class === "exclusively_good") return "var(--good-node)";
+    if (stats.color_class === "mostly_bad") return "var(--mostly-bad)";
+    return "var(--internal)";
+  }
+  if (!node.c || !node.c.length) {
+    const leaf = leafMap.get(node.id);
+    if (leaf && isLeafCorrect(leaf)) return "var(--good-node)";
+    if (leaf && isLeafBad(leaf)) return "var(--bad-node)";
+    if (leaf) return "var(--internal)";
+  }
+  if (node.id === "root") return "var(--accent)";
+  return "var(--internal)";
+}
+
+function nodeStroke(node) {
+  if (node.id === selectedNodeId) return "#fff";
+  const expansion = expansionMap.get(node.id);
+  if (expansion) {
+    if (expansion.outcome_after_rescore === "ditched") return "var(--expanded-ditched)";
+    return "var(--expanded)";
+  }
+  const stats = statsMap.get(node.id);
+  if (stats?.color_class === "exclusively_bad") return "#ff8a80";
+  if (stats?.color_class === "mostly_bad") return "#ffe082";
+  if (stats?.color_class === "exclusively_good") return "#a5d6a7";
+  return "#222";
+}
+
+function nodeRadius(node) {
+  if (node.id === selectedNodeId) return 9;
+  if (expansionMap.has(node.id)) return 8;
+  const stats = statsMap.get(node.id);
+  if (stats?.color_class === "exclusively_bad") return 8;
+  if (stats?.color_class === "mostly_bad") return 7;
+  if (stats?.color_class === "exclusively_good") return 7;
+  if (statusMap.get(node.id) === "ditched") return 6;
+  if (!node.c || !node.c.length) return 5;
+  return 4;
+}
+
+function colorClassLabel(colorClass) {
+  if (colorClass === "exclusively_bad") return "100% bad";
+  if (colorClass === "mostly_bad") return ">75% bad";
+  if (colorClass === "exclusively_good") return "100% good";
+  return "mixed";
+}
+
+function pillClassForStats(stats) {
+  if (!stats) return "";
+  if (stats.color_class === "exclusively_bad") return "bad-node";
+  if (stats.color_class === "mostly_bad") return "mostly-bad";
+  if (stats.color_class === "exclusively_good") return "good-node";
+  return "ditched";
+}
+
+function renderRunMeta(run) {
+  const s = run.summary || {};
+  const leaves = [...leafMap.values()];
+  const nBad = leaves.filter(leaf => isLeafBad(leaf)).length;
+  const nGood = leaves.filter(leaf => isLeafCorrect(leaf)).length;
+  const nOther = leaves.filter(leaf => isLeafNeutral(leaf)).length;
+  const probs = computeLeafProbabilityMasses(leaves);
+  const exclBad = [...statusMap.values()].filter(st => st === "exclusively_bad").length;
+  const expSummary = run.expansion_summary || {};
+  const expansionLine = run.has_expansion && expSummary.nodes_expanded != null
+    ? `<div class="muted" style="margin-top:6px">Expanded ${expSummary.nodes_expanded} nodes · ditched after ${expSummary.nodes_ditched_after || 0} · avg τ* ${fmtVal(expSummary.avg_tau_star)}</div>`
+    : "";
+  document.getElementById("runMeta").innerHTML = [
+    `<div><strong>${MODEL_LABELS[run.model_id] || run.country_name}</strong></div>`,
+    `<div>${run.instruction_variant} · prefix ${run.prefix_length}</div>`,
+    `<div class="muted">Correct if: ${escapeHtml(correctnessModeLabel())}</div>`,
+    `<div class="muted" style="margin-top:6px">τ mass above leaves: ${fmtProb(probs.totalMass)}</div>`,
+    expansionLine,
+  ].join("");
+  document.getElementById("statGrid").innerHTML = `
+    <div class="stat"><strong>${exclBad}</strong><span class="muted">exclusively bad</span></div>
+    <div class="stat"><strong>${nBad}</strong><span class="muted">bad leaves</span></div>
+    <div class="stat"><strong>${nGood}</strong><span class="muted">good leaves</span></div>
+    <div class="stat"><strong>${nOther}</strong><span class="muted">other leaves</span></div>
+    <div class="stat"><strong>${fmtVal(probs.probGoodPct)}%</strong><span class="muted">P(good)</span></div>
+    <div class="stat"><strong>${fmtVal(probs.probBadPct)}%</strong><span class="muted">P(bad)</span></div>
+    <div class="stat"><strong>${fmtVal(probs.probOtherPct)}%</strong><span class="muted">P(other)</span></div>
+  `;
+  const candidateEntries = run.candidate_mention_probs
+    || computeCandidateMentionProbs(leaves);
+  const leafMassTotal = probs.totalMass;
+  renderCandidateBarChart(
+    "runCandidateChart",
+    candidateEntries,
+    null,
+    document.getElementById("runCandidateHint"),
+    "P(mention) per candidate; dashed line = Σ leaf path mass",
+    leafMassTotal
+  );
+}
+
+function renderBadNodeList(run) {
+  const list = document.getElementById("badNodeList");
+  const entries = [...statsMap.entries()]
+    .map(([nodeId, stats]) => ({ nodeId, ...stats }))
+    .filter(item => item.bad_pct > 0)
+    .sort((a, b) => b.bad_pct - a.bad_pct || b.n_leaves - a.n_leaves);
+
+  if (!entries.length) {
+    list.innerHTML = '<p class="muted">No bad leaf descendants in this tree.</p>';
+    return;
+  }
+
+  list.innerHTML = entries.map(n => {
+    const expansion = expansionMap.get(n.nodeId);
+    const expansionBadge = expansion
+      ? `<span class="pill" style="background:#4a3010;color:var(--expanded)">expanded · τ*=${fmtVal(expansion.tau_star)}</span>`
+      : `<span class="pill ditched">baseline</span>`;
+    return `
+    <div class="card node-card ${n.color_class === "mostly_bad" ? "mostly-bad" : n.color_class === "exclusively_good" ? "exclusively-good" : ""}" data-node="${n.nodeId}">
+      <div><strong>${n.nodeId}</strong></div>
+      <div class="muted">${n.n_bad}/${n.n_leaves} bad · ${n.bad_pct_display}% error</div>
+      <span class="pill ${pillClassForStats(n)}">${colorClassLabel(n.color_class)}</span>
+      ${expansionBadge}
+    </div>
+  `;
+  }).join("");
+  list.querySelectorAll(".node-card").forEach(card => {
+    card.addEventListener("click", () => selectNode(card.dataset.node));
+  });
+}
+
+function renderLeafCard(leaf) {
+  const bad = isLeafBad(leaf);
+  const correct = isLeafCorrect(leaf);
+  const cardClass = correct ? "correct" : bad ? "incorrect" : "neutral";
+  const subtypes = classifyBadSubtypes(leaf).filter(s => s !== "correct");
+  const subtypePills = subtypes.length
+    ? subtypes.map(s => `<span class="pill ditched">${SUBTYPE_LABELS[s] || s}</span>`).join(" ")
+    : `<span class="pill yes">${escapeHtml(correctnessModeLabel())}</span>`;
+  const mentionPills = (leaf.mentions || []).map(m =>
+    `<span class="pill ditched">${escapeHtml(m.ballot_name || m.full_name)} (${escapeHtml(m.party || "?")})</span>`
+  ).join(" ");
+  return `
+    <div class="card leaf-card ${cardClass}">
+      <div class="muted">${leaf.leaf_id} · p=${fmtProb(leaf.path_prob)}</div>
+      <div class="answer">${leaf.answer_text ? escapeHtml(leaf.answer_text) : "<em class='muted'>no answer</em>"}</div>
+      <div style="margin-top:8px">
+        <span class="pill ${correct ? "yes" : bad ? "no" : "ditched"}">${correct ? escapeHtml(correctnessModeLabel()) : leaf.mention_category || (bad ? "bad" : "other")}</span>
+        ${subtypePills}
+        ${mentionPills}
+        ${leaf.reasoning_complete ? '<span class="pill yes">complete</span>' : '<span class="pill no">incomplete</span>'}
+      </div>
+    </div>
+  `;
+}
+
+function renderDetailPanel(nodeId) {
+  const panel = document.getElementById("detailPanel");
+  const title = document.getElementById("detailTitle");
+  if (!nodeId) {
+    title.textContent = "All leaf completions";
+    const leaves = [...leafMap.values()].sort((a, b) => b.path_prob - a.path_prob);
+    panel.innerHTML = leaves.length
+      ? leaves.map(renderLeafCard).join("")
+      : '<p class="muted">No completions.</p>';
+    return;
+  }
+  const status = statusMap.get(nodeId);
+  const stats = statsMap.get(nodeId);
+  const expansion = expansionMap.get(nodeId);
+  const leaves = leafDescendants(currentNodes, nodeId)
+    .map(id => leafMap.get(id))
+    .filter(Boolean)
+    .sort((a, b) => b.path_prob - a.path_prob);
+  const subtreeProbs = computeLeafProbabilityMasses(leaves);
+  title.textContent = `Subtree: ${nodeId}`;
+  const expansionBlock = expansion ? `
+    <div class="card" style="border-color:var(--expanded)">
+      <span class="pill" style="background:#4a3010;color:var(--expanded)">expanded</span>
+      <div class="muted" style="margin-top:6px">
+        τ* ${fmtVal(expansion.tau_star)} (from ${fmtVal(expansion.tau_original)}) ·
+        leaves ${expansion.leaves_before} → ${expansion.leaves_after} ·
+        ${(expansion.new_leaf_ids || []).length} new leaves ·
+        outcome: ${expansion.outcome_after_rescore}
+        ${expansion.hit_tau_floor ? " · hit τ floor" : ""}
+      </div>
+    </div>
+  ` : "";
+  panel.innerHTML = `
+    <div class="card">
+      ${stats ? `<span class="pill ${pillClassForStats(stats)}">${stats.bad_pct_display}% bad · ${colorClassLabel(stats.color_class)}</span>` : ""}
+      ${status ? `<span class="pill ${status === "exclusively_bad" ? "bad-node" : "ditched"}">${status}</span>` : ""}
+      <div class="muted" style="margin-top:6px">${leaves.length} leaves · ${leaves.filter(l => isLeafCorrect(l)).length} good · ${leaves.filter(l => isLeafBad(l)).length} bad · ${leaves.filter(l => isLeafNeutral(l)).length} other · P(good)=${fmtVal(subtreeProbs.probGoodPct)}% · P(bad)=${fmtVal(subtreeProbs.probBadPct)}%</div>
+    </div>
+    ${expansionBlock}
+    ${leaves.map(renderLeafCard).join("")}
+  `;
+}
+
+function selectNode(nodeId) {
+  selectedNodeId = nodeId;
+  renderDetailPanel(nodeId);
+  if (currentRun) {
+    const minProb = parseFloat(document.getElementById("probFilter").value);
+    drawGraph(currentNodes, minProb);
+  }
+  focusNode(nodeId);
+}
+
+function focusNode(nodeId) {
+  if (!gRoot) return;
+  const node = gRoot.selectAll(".node").filter(d => d.id === nodeId);
+  if (node.empty()) return;
+  const [[x, y]] = node.data().map(d => [d.sx, d.sy]);
+  const width = svg.node().clientWidth;
+  const height = svg.node().clientHeight;
+  svg.transition().duration(500).call(
+    zoomBehavior.transform,
+    d3.zoomIdentity.translate(width / 2, height / 2).scale(1.4).translate(-x, -y)
+  );
+}
+
+function drawGraph(nodes, minProb) {
+  if (!svg || !gRoot) return;
+  currentNodes = nodes;
+  const highlightBadOnly = document.getElementById("highlightBadOnly").checked;
+  const showExpandedOnly = document.getElementById("showExpandedOnly")?.checked;
+
+  const positions = treePositions(nodes);
+  const edges = buildEdges(nodes, minProb);
+  const visible = visibleNodeIds(edges);
+  const graphNodes = nodes
+    .filter(n => visible.has(n.id))
+    .map(n => ({ ...n, ...positions[n.id] }));
+
+  const width = svg.node().clientWidth;
+  const height = svg.node().clientHeight;
+  const xs = graphNodes.map(n => n.x);
+  const ys = graphNodes.map(n => n.y);
+  const padX = Math.max((Math.max(...xs) - Math.min(...xs)) * 0.08, 1);
+  const padY = Math.max((Math.max(...ys) - Math.min(...ys)) * 0.08, 1);
+  const xScale = d => (d - Math.min(...xs) + padX) * 28;
+  const yScale = d => (d - Math.min(...ys) + padY) * 60;
+  graphNodes.forEach(n => { n.sx = xScale(n.x); n.sy = yScale(n.y); });
+
+  const byId = Object.fromEntries(graphNodes.map(n => [n.id, n]));
+  const links = edges
+    .filter(e => byId[e.source] && byId[e.target])
+    .map(e => ({
+      ...e,
+      sx: byId[e.source].sx, sy: byId[e.source].sy,
+      tx: byId[e.target].sx, ty: byId[e.target].sy,
+    }));
+
+  const maxProb = Math.max(...links.map(l => l.prob), 1e-9);
+  gRoot.selectAll("*").remove();
+
+  gRoot.selectAll(".link")
+    .data(links, d => `${d.source}-${d.target}`)
+    .join("line")
+    .attr("class", "link")
+    .attr("x1", d => d.sx).attr("y1", d => d.sy)
+    .attr("x2", d => d.tx).attr("y2", d => d.ty)
+    .attr("stroke", d => {
+      const stats = statsMap.get(d.target);
+      if (stats?.color_class === "exclusively_bad") return "var(--bad-node)";
+      if (stats?.color_class === "mostly_bad") return "var(--mostly-bad)";
+      if (stats?.color_class === "exclusively_good") return "var(--good-node)";
+      const leaf = leafMap.get(d.target);
+      if (leaf) {
+        if (isLeafCorrect(leaf)) return "var(--good-node)";
+        if (isLeafBad(leaf)) return "var(--bad-node)";
+        return "var(--internal)";
+      }
+      return "#555";
+    })
+    .attr("stroke-width", d => 0.8 + 5 * (d.prob / maxProb))
+    .attr("stroke-opacity", d => {
+      if (showExpandedOnly) {
+        return isExpandedSubtreeHighlighted(d.source) && isExpandedSubtreeHighlighted(d.target)
+          ? 0.85
+          : 0.12;
+      }
+      if (!highlightBadOnly) return 0.85;
+      return isExclusivelyBadHighlighted(d.source) && isExclusivelyBadHighlighted(d.target)
+        ? 0.85
+        : 0.12;
+    })
+    .attr("stroke-linecap", "round");
+
+  const node = gRoot.selectAll(".node")
+    .data(graphNodes, d => d.id)
+    .join("g")
+    .attr("class", "node")
+    .attr("transform", d => `translate(${d.sx},${d.sy})`)
+    .attr("opacity", d => {
+      if (showExpandedOnly && !isExpandedSubtreeHighlighted(d.id)) return 0.08;
+      if (!highlightBadOnly) return 1;
+      return isExclusivelyBadHighlighted(d.id) ? 1 : 0.15;
+    })
+    .style("cursor", "pointer")
+    .on("click", (_, d) => selectNode(d.id));
+
+  node.append("circle")
+    .attr("r", d => nodeRadius(d))
+    .attr("fill", d => nodeFill(d))
+    .attr("stroke", d => nodeStroke(d))
+    .attr("stroke-width", d => {
+      if (d.id === selectedNodeId) return 2.5;
+      if (expansionMap.has(d.id)) return 2.5;
+      return statusMap.get(d.id) === "exclusively_bad" ? 2 : 1;
+    });
+
+  node.filter(d => expansionMap.has(d.id))
+    .append("circle")
+    .attr("r", d => nodeRadius(d) + 4)
+    .attr("fill", "none")
+    .attr("stroke", d => {
+      const exp = expansionMap.get(d.id);
+      return exp?.outcome_after_rescore === "ditched" ? "var(--expanded-ditched)" : "var(--expanded)";
+    })
+    .attr("stroke-width", 2);
+
+  node.append("text")
+    .attr("dy", d => (d.c && d.c.length ? -12 : 14))
+    .attr("text-anchor", "middle")
+    .attr("fill", "#ccc")
+    .attr("font-size", "10px")
+    .attr("font-family", "ui-monospace, monospace")
+    .text(d => {
+      if (d.id === "root") return "prompt";
+      const tok = displayToken(d.tok);
+      return tok.length > 12 ? tok.slice(0, 10) + "…" : tok;
+    });
+
+  node.filter(d => statsMap.has(d.id) && (d.c && d.c.length))
+    .append("text")
+    .attr("dy", 16)
+    .attr("text-anchor", "middle")
+    .attr("fill", d => {
+      const stats = statsMap.get(d.id);
+      if (stats?.color_class === "exclusively_bad") return "#ff8a80";
+      if (stats?.color_class === "mostly_bad") return "#ffe082";
+      if (stats?.color_class === "exclusively_good") return "#a5d6a7";
+      return "#aaa";
+    })
+    .attr("font-size", "9px")
+    .text(d => `${statsMap.get(d.id).bad_pct_display}%`);
+
+  const tooltip = document.getElementById("tooltip");
+  node.on("mouseenter", (event, d) => {
+    const status = statusMap.get(d.id);
+    const stats = statsMap.get(d.id);
+    const leaf = leafMap.get(d.id);
+    let html = `<div class="tok">${escapeHtml(displayToken(d.id === "root" ? null : d.tok))}</div>`;
+    html += `<div>id: ${d.id} · depth ${d.d}</div>`;
+    html += `<div>path prob: ${fmtProb(d.p)}</div>`;
+    if (stats) {
+      html += `<div><span class="pill ${pillClassForStats(stats)}">${stats.bad_pct_display}% bad (${stats.n_bad}/${stats.n_leaves})</span></div>`;
+    }
+    if (status) html += `<div><span class="pill ${status === "exclusively_bad" ? "bad-node" : "ditched"}">${status}</span></div>`;
+    const expansion = expansionMap.get(d.id);
+    if (expansion) {
+      html += `<div><span class="pill" style="background:#4a3010;color:var(--expanded)">expanded · τ* ${fmtVal(expansion.tau_star)}</span></div>`;
+    }
+    if (leaf) html += `<div style="margin-top:6px">${escapeHtml(leaf.answer_text || "(no answer)")}</div>`;
+    tooltip.innerHTML = html;
+    tooltip.style.display = "block";
+  }).on("mousemove", event => {
+    tooltip.style.left = (event.clientX + 14) + "px";
+    tooltip.style.top = (event.clientY + 14) + "px";
+  }).on("mouseleave", () => { tooltip.style.display = "none"; });
+
+  fitToScreen();
+}
+
+function fitToScreen() {
+  if (!gRoot || !svg) return;
+  const bounds = gRoot.node().getBBox();
+  const width = svg.node().clientWidth;
+  const height = svg.node().clientHeight;
+  if (!bounds.width || !bounds.height) return;
+  const midX = bounds.x + bounds.width / 2;
+  const midY = bounds.y + bounds.height / 2;
+  const scale = 0.9 / Math.max(bounds.width / width, bounds.height / height);
+  svg.transition().duration(400).call(
+    zoomBehavior.transform,
+    d3.zoomIdentity.translate(width / 2, height / 2).scale(scale).translate(-midX, -midY)
+  );
+}
+
+function loadRun(treeKey) {
+  const run = DATA.runs.find(r => r.tree_key === treeKey);
+  const nodes = DATA.trees[treeKey];
+  if (!run || !nodes) return;
+
+  currentRun = run;
+  currentNodes = nodes;
+  selectedNodeId = null;
+  leafMap = new Map(Object.entries((DATA.leaf_completions[treeKey] || {})));
+  expansionMap = new Map(Object.entries((DATA.node_expansions?.[treeKey] || {})));
+  statsMap = computeNodeErrorStatsMap(nodes, leafMap);
+  statusMap = recomputeCandidateStatus(nodes, leafMap);
+  recomputeExclusivelyBadHighlight(nodes);
+  recomputeExpandedSubtreeHighlight(nodes);
+
+  renderRunMeta(run);
+  renderBadNodeList(run);
+  renderDetailPanel(null);
+
+  const minProb = parseFloat(document.getElementById("probFilter").value);
+  drawGraph(nodes, minProb);
+}
+
+function initTreeExplorer() {
+  svg = d3.select("#graph");
+  gRoot = svg.append("g");
+  zoomBehavior = d3.zoom()
+    .scaleExtent([0.05, 8])
+    .on("zoom", event => gRoot.attr("transform", event.transform));
+  svg.call(zoomBehavior);
+
+  document.getElementById("fitBtn").addEventListener("click", fitToScreen);
+  document.getElementById("resetBtn").addEventListener("click", () => {
+    svg.transition().duration(300).call(zoomBehavior.transform, d3.zoomIdentity);
+  });
+
+  populateTreeFilters();
+  refreshRunSelect(null);
+
+  document.getElementById("runSelect").addEventListener("change", e => loadRun(e.target.value));
+  document.getElementById("regionFilter").addEventListener("change", () => refreshRunSelect(currentRun?.tree_key));
+  document.getElementById("countryFilter").addEventListener("change", () => refreshRunSelect(currentRun?.tree_key));
+  document.getElementById("probFilter").addEventListener("change", () => {
+    if (currentRun) loadRun(currentRun.tree_key);
+  });
+  document.getElementById("highlightBadOnly").addEventListener("change", () => {
+    if (currentRun) {
+      const minProb = parseFloat(document.getElementById("probFilter").value);
+      drawGraph(currentNodes, minProb);
+    }
+  });
+  document.getElementById("showExpandedOnly").addEventListener("change", () => {
+    if (currentRun) {
+      const minProb = parseFloat(document.getElementById("probFilter").value);
+      drawGraph(currentNodes, minProb);
+    }
+  });
+  for (const item of BAD_SUBTYPE_OPTIONS) {
+    document.getElementById(`badFilter_${item.id}`).addEventListener("change", refreshStatsForMode);
+  }
+  document.getElementById("badPresetAll").addEventListener("click", () => {
+    setBadSubtypeFilters(BAD_SUBTYPE_OPTIONS.map(item => item.id));
+    refreshStatsForMode();
+  });
+  document.getElementById("badPresetCandidatesOnly").addEventListener("click", () => {
+    setBadSubtypeFilters(["mentioned_candidates"]);
+    refreshStatsForMode();
+  });
+}
+
+function initCorrectnessControls() {
+  populateCorrectnessModeSelect(document.getElementById("correctnessMode"));
+  populateCorrectnessModeSelect(document.getElementById("treeCorrectnessMode"));
+  setCorrectnessMode(localStorage.getItem(CORRECTNESS_STORAGE_KEY) || "no_politicians");
+  document.getElementById("correctnessMode").addEventListener("change", e => onCorrectnessModeChange(e.target.value));
+  document.getElementById("treeCorrectnessMode").addEventListener("change", e => onCorrectnessModeChange(e.target.value));
+}
+
+function init() {
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+  });
+  initCorrectnessControls();
+  populateSummaryFilters();
+  ["prefixFilter", "variantFilter", "summaryRegionFilter", "summaryCountryFilter", "aggSelect", "metricSelect", "candidateMetricSelect"]
+    .forEach(id => document.getElementById(id).addEventListener("change", renderSummary));
+
+  renderSummary();
+  initTreeExplorer();
+  window.addEventListener("resize", () => {
+    applyFrozenColumns();
+    renderGroupedCandidateModelChart();
+    renderGroupedPoliticianModelChart();
+  });
+
+  const partial = DATA.bad_nodes_trees < DATA.mech_interp_trees;
+  document.getElementById("source").textContent =
+    `Source: ${DATA.source} · generated ${DATA.generated_at} · ` +
+    `${DATA.bad_nodes_trees}/${DATA.mech_interp_trees} trees analyzed` +
+    (partial ? " (pipeline still running — rebuild dashboard when complete)" : "");
+}
+
+fetch(`president_dashboard.json?ts=${Date.now()}`)
+  .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); })
+  .then(data => {
+    DATA = data;
+    treeProbMassIndex = buildTreeProbMassIndex();
+    init();
+  })
+  .catch(err => {
+    document.getElementById("source").innerHTML =
+      `<span class="error">Failed to load president_dashboard.json: ${err.message}. Serve output/president/ via HTTP.</span>`;
+  });
+</script>
+</body>
+</html>

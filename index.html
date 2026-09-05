@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tree of Reasoning — Dashboards</title>
+<script src="assets/vendor/d3.min.js"></script>
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body>
+<header>
+  <h1>Tree of Reasoning</h1>
+  <p class="muted">Unified dashboard for capitals, elections, interactive τ-tree experiments, and legacy prompts.</p>
+  <div class="top-tabs">
+    <button type="button" class="top-tab-btn active" data-experiment="capitals">Capitals</button>
+    <button type="button" class="top-tab-btn" data-experiment="ignoreLorem">Ignore lorem</button>
+    <button type="button" class="top-tab-btn" data-experiment="elections">Elections</button>
+    <button type="button" class="top-tab-btn" data-experiment="interactive">Interactive</button>
+  </div>
+</header>
+
+<!-- Capitals -->
+<section id="capitalsPanel" class="experiment-panel active">
+  <p class="muted" id="capitalsSource" style="padding:0 20px">Loading…</p>
+  <div class="progress-bar"><div class="progress-fill" id="capitalsProgressFill" style="width:0%"></div></div>
+  <div class="tabs" style="padding:0 20px">
+    <button type="button" class="tab-btn active" data-tab="summary">Summary</button>
+    <button type="button" class="tab-btn" data-tab="trees">Tree Explorer</button>
+  </div>
+  <div id="capitalsPanel_summaryPanel" class="panel active">
+    <div class="summary-wrap">
+      <div class="stat-grid" id="capitalsGlobalStats"></div>
+      <div class="summary-controls">
+        <label>Prefix <select id="capitalsPrefixFilter"><option value="">All</option></select></label>
+        <label>Region <select id="capitalsRegionFilter"><option value="">All</option></select></label>
+        <label>Country <select id="capitalsCountryFilter"><option value="">All</option></select></label>
+        <label>Aggregate <select id="capitalsAggSelect">
+          <option value="whole">Whole</option>
+          <option value="by_region">By region</option>
+          <option value="by_country">By country</option>
+          <option value="by_prefix_length">By prefix</option>
+        </select></label>
+        <label>Chart metric <select id="capitalsMetricSelect"></select></label>
+        <label>Scatter X <select id="capitalsScatterX"></select></label>
+        <label>Scatter Y <select id="capitalsScatterY"></select></label>
+      </div>
+      <p class="muted filter-hint" id="capitalsFilterHint"></p>
+      <div class="chart-row">
+        <div class="chart-card"><h3 id="capitalsBarChartTitle">Bar chart</h3><svg id="capitalsBarChart" class="chart"></svg></div>
+        <div class="chart-card"><h3 id="capitalsScatterChartTitle">Scatter</h3><svg id="capitalsScatterChart" class="chart"></svg></div>
+      </div>
+      <div class="summary-table-wrap"><table class="summary" id="capitalsSummaryTable"><thead></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+  <div id="capitalsPanel_treesPanel" class="panel">
+    <div class="controls">
+      <label>Tree <select id="capitalsRunSelect"></select></label>
+      <label>Min edge prob <select id="capitalsProbFilter">
+        <option value="0">0</option><option value="0.01" selected>0.01 (τ)</option>
+      </select></label>
+      <label><input type="checkbox" id="capitalsShowBad" checked /> Bad nodes</label>
+      <label><input type="checkbox" id="capitalsShowGood" checked /> Good nodes</label>
+      <label><input type="checkbox" id="capitalsHighlightBadOnly" /> Dim non-bad subtrees</label>
+      <button type="button" id="capitalsFitBtn">Fit</button>
+      <button type="button" id="capitalsResetBtn">Reset zoom</button>
+    </div>
+    <div class="bad-filter" id="capitalsBadFilter">
+      <span class="muted">Count as bad:</span>
+      <label><input type="checkbox" id="badFilter_wrong_city" checked /> wrong city</label>
+      <label><input type="checkbox" id="badFilter_empty" checked /> no answer</label>
+      <label><input type="checkbox" id="badFilter_incomplete" checked /> incomplete</label>
+      <label><input type="checkbox" id="badFilter_lorem_drift" checked /> lorem drift</label>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--bad-node)"></i> 100% bad</span>
+      <span><i style="background:var(--mostly-bad)"></i> &gt;75% bad</span>
+      <span><i style="background:var(--good-node)"></i> 100% good</span>
+      <span><i style="background:var(--internal)"></i> mixed</span>
+      <span><i style="background:var(--expanded)"></i> expanded</span>
+    </div>
+    <div class="layout">
+      <div class="graph-wrap"><svg id="capitalsGraph" class="tree-graph-svg"></svg><div id="capitalsTooltip" class="tree-tooltip"></div></div>
+      <aside class="sidebar">
+        <div class="card"><h3>Run</h3><div id="capitalsRunMeta" class="muted">—</div></div>
+        <div class="stat-grid" id="capitalsRunStats"></div>
+        <h3 style="font-size:14px;margin:0 0 8px">Nodes by error rate</h3>
+        <div id="capitalsBadNodeList" class="muted">Load a tree.</div>
+        <h3 style="font-size:14px;margin:12px 0 8px">Selected node</h3>
+        <div id="capitalsDetail"><p class="muted">Click a node.</p></div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- Ignore lorem (legacy capitals prompts) -->
+<section id="ignoreLoremPanel" class="experiment-panel">
+  <p class="muted" id="ignoreLoremSource" style="padding:0 20px">Loading…</p>
+  <div class="progress-bar"><div class="progress-fill" id="ignoreLoremProgressFill" style="width:0%"></div></div>
+  <div class="tabs" style="padding:0 20px">
+    <button type="button" class="tab-btn active" data-tab="summary">Summary</button>
+    <button type="button" class="tab-btn" data-tab="trees">Tree Explorer</button>
+  </div>
+  <div id="ignoreLoremPanel_summaryPanel" class="panel active">
+    <div class="summary-wrap">
+      <div class="stat-grid" id="ignoreLoremGlobalStats"></div>
+      <div class="summary-controls">
+        <label>Prefix <select id="ignoreLoremPrefixFilter"><option value="">All</option></select></label>
+        <label>Region <select id="ignoreLoremRegionFilter"><option value="">All</option></select></label>
+        <label>Country <select id="ignoreLoremCountryFilter"><option value="">All</option></select></label>
+        <label>Aggregate <select id="ignoreLoremAggSelect">
+          <option value="whole">Whole</option>
+          <option value="by_region">By region</option>
+          <option value="by_country">By country</option>
+          <option value="by_prefix_length">By prefix</option>
+        </select></label>
+        <label>Chart metric <select id="ignoreLoremMetricSelect"></select></label>
+        <label>Scatter X <select id="ignoreLoremScatterX"></select></label>
+        <label>Scatter Y <select id="ignoreLoremScatterY"></select></label>
+      </div>
+      <p class="muted filter-hint" id="ignoreLoremFilterHint"></p>
+      <div class="chart-row">
+        <div class="chart-card"><h3 id="ignoreLoremBarChartTitle">Bar chart</h3><svg id="ignoreLoremBarChart" class="chart"></svg></div>
+        <div class="chart-card"><h3 id="ignoreLoremScatterChartTitle">Scatter</h3><svg id="ignoreLoremScatterChart" class="chart"></svg></div>
+      </div>
+      <div class="summary-table-wrap"><table class="summary" id="ignoreLoremSummaryTable"><thead></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+  <div id="ignoreLoremPanel_treesPanel" class="panel">
+    <div class="controls">
+      <label>Tree <select id="ignoreLoremRunSelect"></select></label>
+      <label>Min edge prob <select id="ignoreLoremProbFilter">
+        <option value="0">0</option><option value="0.01" selected>0.01 (τ)</option>
+      </select></label>
+      <label><input type="checkbox" id="ignoreLoremShowBad" checked /> Bad nodes</label>
+      <label><input type="checkbox" id="ignoreLoremShowGood" checked /> Good nodes</label>
+      <label><input type="checkbox" id="ignoreLoremHighlightBadOnly" /> Dim non-bad subtrees</label>
+      <button type="button" id="ignoreLoremFitBtn">Fit</button>
+      <button type="button" id="ignoreLoremResetBtn">Reset zoom</button>
+    </div>
+    <div class="bad-filter" id="ignoreLoremBadFilter">
+      <span class="muted">Count as bad:</span>
+      <label><input type="checkbox" id="badFilter_wrong_city" checked /> wrong city</label>
+      <label><input type="checkbox" id="badFilter_empty" checked /> no answer</label>
+      <label><input type="checkbox" id="badFilter_incomplete" checked /> incomplete</label>
+      <label><input type="checkbox" id="badFilter_lorem_reasoning" checked /> mention lorem in reasoning</label>
+      <label><input type="checkbox" id="badFilter_lorem_answer" checked /> mention lorem in answer</label>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--bad-node)"></i> 100% bad</span>
+      <span><i style="background:var(--mostly-bad)"></i> &gt;75% bad</span>
+      <span><i style="background:var(--good-node)"></i> 100% good</span>
+      <span><i style="background:var(--internal)"></i> mixed</span>
+      <span><i style="background:var(--expanded)"></i> expanded</span>
+    </div>
+    <div class="layout">
+      <div class="graph-wrap"><svg id="ignoreLoremGraph" class="tree-graph-svg"></svg><div id="ignoreLoremTooltip" class="tree-tooltip"></div></div>
+      <aside class="sidebar">
+        <div class="card"><h3>Run</h3><div id="ignoreLoremRunMeta" class="muted">—</div></div>
+        <div class="stat-grid" id="ignoreLoremRunStats"></div>
+        <h3 style="font-size:14px;margin:0 0 8px">Nodes by error rate</h3>
+        <div id="ignoreLoremBadNodeList" class="muted">Load a tree.</div>
+        <h3 style="font-size:14px;margin:12px 0 8px">Selected node</h3>
+        <div id="ignoreLoremDetail"><p class="muted">Click a node.</p></div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- Elections -->
+<section id="electionsPanel" class="experiment-panel">
+  <p class="muted" id="electionsSource" style="padding:0 20px">Loading…</p>
+  <div class="tabs" style="padding:0 20px">
+    <button type="button" class="tab-btn active" data-tab="summary">Summary</button>
+    <button type="button" class="tab-btn" data-tab="trees">Tree Explorer</button>
+  </div>
+  <div id="electionsPanel_summaryPanel" class="panel active">
+    <div class="summary-wrap">
+      <div class="stat-grid" id="electionsGlobalStats"></div>
+      <div class="summary-controls">
+        <label>Correct if <select id="electionsCorrectnessMode"></select></label>
+        <label>Prefix <select id="electionsPrefixFilter"><option value="">All</option></select></label>
+        <label>Aggregate <select id="electionsAggSelect">
+          <option value="whole">Whole</option>
+          <option value="by_model">By model</option>
+          <option value="by_instruction_variant">By prompt</option>
+        </select></label>
+        <label>Chart metric <select id="electionsMetricSelect"></select></label>
+      </div>
+      <p class="muted filter-hint" id="electionsFilterHint"></p>
+      <div class="chart-row">
+        <div class="chart-card"><h3 id="electionsBarChartTitle">Summary metric</h3><svg id="electionsBarChart" class="chart"></svg></div>
+        <div class="chart-card"><h3 id="electionsCandidateChartTitle" data-default-title="Candidate mention mass">Candidate mention mass</h3><svg id="electionsCandidateChart" class="chart"></svg></div>
+      </div>
+      <div class="summary-table-wrap"><table class="summary" id="electionsSummaryTable"><thead></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+  <div id="electionsPanel_treesPanel" class="panel">
+    <div class="controls">
+      <label>Tree <select id="electionsRunSelect"></select></label>
+      <label>Correct if <select id="electionsTreeCorrectnessMode"></select></label>
+      <label>Min edge prob <select id="electionsProbFilter">
+        <option value="0">0</option><option value="0.01" selected>0.01 (τ)</option>
+      </select></label>
+      <button type="button" id="electionsFitBtn">Fit</button>
+      <button type="button" id="electionsResetBtn">Reset zoom</button>
+    </div>
+    <div class="legend" id="electionsLegend"></div>
+    <div class="layout">
+      <div class="graph-wrap"><svg id="electionsGraph" class="tree-graph-svg"></svg><div id="electionsTooltip" class="tree-tooltip"></div></div>
+      <aside class="sidebar">
+        <div class="card"><h3>Run</h3><div id="electionsRunMeta" class="muted">—</div></div>
+        <div class="chart-card"><h3 id="electionsRunCandidateChartTitle" data-default-title="Per-candidate P(mention)">Per-candidate P(mention)</h3><svg id="electionsRunCandidateChart" class="chart"></svg></div>
+        <div class="stat-grid" id="electionsRunStats"></div>
+        <h3 style="font-size:14px;margin:0 0 8px">Selected node</h3>
+        <div id="electionsDetail"><p class="muted">Click a node.</p></div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- Interactive -->
+<section id="interactivePanel" class="experiment-panel">
+  <div style="padding:0 20px">
+    <p class="muted" id="interactiveSource">Loading…</p>
+    <div class="view-only-banner" style="display:none">
+      <strong>View only.</strong> Tree generation, saving, and rescoring require running
+      <code>serve_dashboard.py</code> locally with a GPU.
+    </div>
+    <p class="tau-slow-warning" id="interactiveTauWarning" hidden>
+      <strong>Large trees.</strong> τ below 0.01 can have thousands of nodes and may take 30+ seconds
+      to download and render in Tree Explorer.
+    </p>
+    <div class="generate-panel">
+      <div>
+        <label>Prompt <textarea id="interactivePrompt" placeholder="What is the capital of Brazil?"></textarea></label>
+        <div class="generate-row">
+          <label>Expected answers <input id="interactiveExpected" type="text" placeholder="Brasília, Brasilia" /></label>
+          <label>Model <select id="interactiveModel"></select></label>
+          <label>τ <select id="interactiveTau"></select></label>
+        </div>
+        <p class="muted" id="interactiveStatus"></p>
+      </div>
+      <div>
+        <button type="button" id="interactiveGenerateBtn" style="margin-bottom:8px">Generate tree</button>
+        <button type="button" id="interactiveSaveBtn">Save tree</button>
+      </div>
+    </div>
+  </div>
+  <div class="tabs" style="padding:0 20px">
+    <button type="button" class="tab-btn active" data-tab="summary">Summary</button>
+    <button type="button" class="tab-btn" data-tab="trees">Tree Explorer</button>
+  </div>
+  <div id="interactivePanel_summaryPanel" class="panel active">
+    <div class="summary-wrap">
+      <div class="stat-grid" id="interactiveGlobalStats"></div>
+      <div class="summary-controls">
+        <label>Model <select id="interactiveModelFilter"><option value="">All</option></select></label>
+        <label>Summary τ <select id="interactiveTauFilter"></select></label>
+        <label>Chart metric <select id="interactiveMetricSelect"></select></label>
+        <label>Scatter X <select id="interactiveScatterX"></select></label>
+        <label>Scatter Y <select id="interactiveScatterY"></select></label>
+      </div>
+      <p class="muted filter-hint" id="interactiveFilterHint"></p>
+      <div class="chart-row">
+        <div class="chart-card"><h3 id="interactiveBarChartTitle">Bar chart</h3><svg id="interactiveBarChart" class="chart"></svg></div>
+        <div class="chart-card"><h3 id="interactiveScatterChartTitle">Scatter</h3><svg id="interactiveScatterChart" class="chart"></svg></div>
+      </div>
+      <div class="summary-table-wrap"><table class="summary" id="interactiveSummaryTable"><thead></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+  <div id="interactivePanel_treesPanel" class="panel">
+    <div class="controls">
+      <label>Tree <select id="interactiveRunSelect"></select></label>
+      <label>Min edge prob <select id="interactiveProbFilter">
+        <option value="0">0 (show all)</option>
+      </select></label>
+      <label><input type="checkbox" id="interactiveShowBad" checked /> Bad nodes</label>
+      <label><input type="checkbox" id="interactiveShowGood" checked /> Good nodes</label>
+      <label><input type="checkbox" id="interactiveDimOther" /> Dim other nodes</label>
+      <button type="button" id="interactiveFitBtn">Fit</button>
+      <button type="button" id="interactiveResetBtn">Reset zoom</button>
+    </div>
+    <div class="legend" id="interactiveLegend"></div>
+    <div class="layout">
+      <div class="graph-wrap"><svg id="interactiveGraph" class="tree-graph-svg"></svg><div id="interactiveTooltip" class="tree-tooltip"></div></div>
+      <aside class="sidebar">
+        <div class="card"><h3>Run</h3><div id="interactiveRunMeta" class="muted">—</div></div>
+        <h3 style="font-size:14px;margin:0 0 8px">Selected node</h3>
+        <div id="interactiveDetail"><p class="muted">Click a node.</p></div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<script src="assets/site.js"></script>
+<script src="assets/motif-columns.js"></script>
+<script src="assets/summary-aggregate.js"></script>
+<script src="assets/summary-charts.js"></script>
+<script src="assets/elections-correctness.js"></script>
+<script src="assets/detail-panel.js"></script>
+<script src="assets/tree-graph.js"></script>
+<script src="assets/summary-panel.js"></script>
+<script src="assets/adapters/capitals.js"></script>
+<script src="assets/adapters/elections.js"></script>
+<script src="assets/adapters/interactive.js"></script>
+</body>
+</html>
